@@ -12,9 +12,9 @@ import qualified Data.ByteString.Lazy.Char8 as BLC
 
 import           Data.List            (isPrefixOf)
 ----
-import           Pascal.Lexer            (runAlex)
-import           Pascal.Data            (Program)
-import           Pascal.Parser          (happyParser)
+import           Pascal.Lexer         (runAlex)
+import           Pascal.Data          (Program)
+import           Pascal.Parser        (happyParser)
 ----------------------------------------------------------------------------
 
 data ErrClass
@@ -35,7 +35,7 @@ parse s =
     -- otherwise we cannot get type-safe information out of 'parse'.
     let showErrPrefix = "show-error: " :: String
         lexicalErrorPrefix = "lexical error at line " :: String
-     in case runAlex s $ happyParser of
+     in case runAlex s happyParser of
             Right x -> Right x
             Left str | showErrPrefix `isPrefixOf` str ->
                           let (line, column, m) =

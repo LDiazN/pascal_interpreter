@@ -31,8 +31,8 @@ data BoolExp =
     -- comparison operator: Comp name expression expression
     | Comp String Exp Exp
     -- true and false constants
-    | True_C
-    | False_C
+    | TrueC
+    | FalseC
 
 -- Data-structure for statements
 data Statement = 
