@@ -26,6 +26,7 @@ module Pascal.Lexer
 where
 
 import System.Exit
+import Control.Monad
 import qualified Data.ByteString.Lazy.Char8 as B
 }
 
@@ -38,47 +39,66 @@ $alpha = [a-zA-Z]               -- alphabetic characters
 -- TODO: Map symbols into token types (with or without parameters)
 tokens :-
 
+  <0> $white+                               ; -- remove multiple white-spaces
   -- < Keywords > ----------------------------------------------
-  begin                                 { readTok   TkBegin }
-  end                                   { readTok   TkBegin }
-  program                               { readTok   TkProgram }  
-  var                                   { readTok   TkVar }
-  if                                    { readTok   TkIf }
-  else                                  { readTok   TkElse }
-  then                                  { readTok   TkThen }
-  writeln|readln|sqrt|sin|cos|ln|exp    { readFunc }
-  while                                 { readTok   TkWhile }
-  do                                    { readTok   TkDo }
-  for                                   { readTok   TkFor }
-  to                                    { readTok   TkTo }
-  break                                 { readTok   TkBreak }
-  continue                              { readTok   TkContinue }
-  function                              { readTok   TkFunction }
-  procedure                             { readTok   TkProcedure }
+  <0> begin                                 { readTkGen }
+  <0> end                                   { readTkGen }
+  <0> program                               { readTkGen }  
+  <0> var                                   { readTkGen }
+  <0> if                                    { readTkGen }
+  <0> else                                  { readTkGen }
+  <0> then                                  { readTkGen }
+  <0> case                                  { readTkGen }
+  <0> of                                    { readTkGen }
+  <0> writeln|readln|sqrt|sin|cos|ln|exp    { readTkGen }
+  <0> while                                 { readTkGen }
+  <0> do                                    { readTkGen }
+  <0> for                                   { readTkGen }
+  <0> to                                    { readTkGen }
+  <0> break                                 { readTkGen }
+  <0> continue                              { readTkGen }
+  <0> function                              { readTkGen }
+  <0> procedure                             { readTkGen }
+
+  -- < Supported Data Types > ----------------------------------
+  <0> real                                  { readTkGen }
+  <0> boolean                               { readTkGen }
 
   -- < Operators & separators > --------------------------------
-  [\+]|[\-]|[\*]|[\/]|[\%]              { readAritOper }
-  [\=]|\>\=|\<\=|\<|\>|\<\>             { readRelOper }
-  and|or|not                            { readBoolOper }
-  \:\=                                  { readTok   TkInitVar }
-  \=                                    { readTok   TkAssign }
-  \;                                    { readTok   TkSemiColon }
-  \:                                    { readTok   TkColon }
-  \,                                    { readTok   TkComma }
+  <0> [\+]|[\-]|[\*]|[\/]|[\%]              { readAritOper }
+  <0> [\=]|\>\=|\<\=|\<|\>|\<\>             { readRelOper }
+  <0> and|or|not                            { readBoolOper }
+  <0> \:\=                                  { readTkGen }
+  <0> \=                                    { readTkGen }
+  <0> \;                                    { readTkGen }
+  <0> \:                                    { readTkGen }
+  <0> \,                                    { readTkGen }
+  <0> \.                                    { readTkGen }
+  <0> \(                                    { readTkGen }
+  <0> \)                                    { readTkGen }
 
   -- < Constants & names > -------------------------------------
-  true                                  { readTok  TkTrue }
-  false                                 { readTok  TkFalse }
-  $digit+                               { readInt }
-  $alpha [$alpha $digit \_ \']*         { readId }
+  <0> true                                  { readTkGen }
+  <0> false                                 { readTkGen }
+  <0> $digit+\.$digit+                      { readReal }
+  <0> $alpha [$alpha $digit \_ \']*         { readId }
 
   -- < Unvalid Tokens > ----------------------------------------
-  $digit+ $alpha [$alpha $digit \_ \']* { addErrUndef }
-
+  <0> $digit+ $alpha [$alpha $digit \_ \']* { addErrUndef }
+  <0> \*\)                                  { addErrUnMtchComm }
+  <0> .                                     { addErrUndef }
+  
   -- < To ignore > ---------------------------------------------
-  "//".*                                ; -- skip one line comments
-  $white+                               ; -- remove multiple white-spaces
-  --[\(]|[\)]|begin|end                   { readTok     TokenK }
+  <0> "//".*                                ; -- skip one line comments
+  <0> \(\*                                  { begin comment }
+  <comment> \*\)                            { begin program }
+  <comment> $white+                         ; -- ignore anything 
+                                              -- inside a comment.
+  <comment> .                               ;
+  -- Note: Since we have a comment and a program state, it's easier to 
+  -- add some restrictions if needed. If we don't want nested comments, 
+  -- we can use the comment state to check such errors.
+  -- If we want to add string data types, then it's easier with state handling.
 {
 
 -- Some action helpers:
@@ -87,15 +107,24 @@ tokens :-
 --tok_string x = tok' (\s -> x (B.unpack s))
 --tok_read x = tok' (\s -> x . read . B.unpack $ s)
 
+----- << Possible reader states >> -----
+program :: Int 
+program = 0
+
+
 ----- << Token Reader functions >> -----
 -- Given a token without associated value, return an action 
 readTok :: TokenClass -> AlexInput -> Int64 -> Alex Token
 readTok t (alxpsn, _, _, _) _ = return $ Token alxpsn t 
 
+readTkGen :: AlexInput ->Int64 -> Alex Token
+readTkGen (pn@(AlexPn _ r c), _, s, _) l = 
+        return (Token pn . TkGen . take (fromIntegral l) . B.unpack $ s)
+
 -- Action to read an int token
-readInt :: AlexInput -> Int64 -> Alex Token
-readInt (pn@(AlexPn _ r c), _, s, _) l = 
-        return (Token pn . TkInt . read . take (fromIntegral l) . B.unpack $ s)
+readReal :: AlexInput -> Int64 -> Alex Token
+readReal (pn@(AlexPn _ r c), _, s, _) l = 
+        return (Token pn . TkReal . read . take (fromIntegral l) . B.unpack $ s)
 
 -- Action to read an id 
 readId :: AlexInput -> Int64 -> Alex Token
@@ -122,17 +151,28 @@ readFunc :: AlexInput -> Int64 -> Alex Token
 readFunc (pn@(AlexPn _ r c), _, s, _) l = 
         return (Token pn . TkBuiltfunc . take (fromIntegral l) . B.unpack $ s)
 
+-- Helper function to add an error to the error stack
+addError :: LexError -> Alex ()
+addError e = do
+  errors    <- getErrors 
+  setErrors (e:errors)
 
 -- Action to add an error if found
 addErrUndef  :: AlexInput -> Int64 -> Alex Token
 addErrUndef (AlexPn _ ln c, _, s, _) l = do
       let id = take (fromIntegral l) . B.unpack $ s
           e = UndefToken id ln c
-      errors <- getErrors
-      setErrors (e:errors)
+      addError e
       alexMonadScan
 
+-- Action to add an error if found
+addErrUnMtchComm  :: AlexInput -> Int64 -> Alex Token
+addErrUnMtchComm (AlexPn _ ln c, _, s, _) l = do
+      let e = UnmatchedCommClose ln c
+      addError e
+      alexMonadScan
 
+----- << Alex analyzer functions >> -----
 -- Main function: Returns a token list from a String
 -- This function returns a list of tokens given string
 tokenizer :: String -> Either String [Token]
@@ -143,7 +183,11 @@ tokenizer s = do
             Token _ TkEOF ->do  
                               -- Now that we reached the end of file, 
                               -- we have to check if there was some error
-                              errs <- getErrors
+
+                              -- check if all the comments are closed
+                              stcode <- alexGetStartCode
+                              when (stcode==comment) $ addError UnexpectedEOF
+                              errs   <- getErrors
                               case errs of 
                                 [] -> return []
                                 _  -> alexError . unlines . map show $ errs
@@ -155,14 +199,11 @@ tokenizer s = do
     runAlex (B.pack s) loop
         
 
-
-
-
 -- user state data type
 data AlexUserState = AlexUserState{
-                      errors :: [LexError]
+                      errors :: [LexError] --A stack of errors 
                     }
-
+-- Initialization function required by alex
 alexInitUserState :: AlexUserState                    
 alexInitUserState = AlexUserState []
 
@@ -174,8 +215,7 @@ setErrors e = Alex $ \s@AlexState{ alex_ust = ust } -> Right (s{alex_ust = ust{e
 
 
 
-
------- < Token Data Types > ------
+------ << Token Data Types >> ------
 data Token = Token AlexPosn TokenClass
   deriving (Show)
 
@@ -192,9 +232,12 @@ data TokenClass
  = TkAritOper    { aritOper :: String }    
  | TkRelOper     { relOper  :: String }    
  | TkBoolOper    { boolOper :: String }
+ | TkGen         { tkVal    :: String } --Generic token
+ | TkBoolType
+ | TkRealType          
  | TkTrue      
  | TkFalse      
- | TkInt         { intVal :: Int}
+ | TkReal        { realVal :: Float }
  | TkId          { idVal :: String }
  | TkEOF
  | TkBegin
@@ -204,6 +247,8 @@ data TokenClass
  | TkIf
  | TkElse
  | TkThen
+ | TkCase
+ | TkOf
  | TkBuiltfunc   { funcName :: String }
  | TkWhile  
  | TkFor
@@ -218,17 +263,32 @@ data TokenClass
  | TkColon
  | TkSemiColon
  | TkComma
+ | TkDot
+ | TkParOpen
+ | TkParClose
  
 
  deriving (Eq, Show)
 
 data LexError = UndefToken{ undefTok :: String, 
                             undfline :: Int, 
-                            undfpos :: Int }
+                            undfpos  :: Int }
+
+              | UnexpectedEOF
+              | UnmatchedCommClose{
+                            unmtCommLn  :: Int,
+                            unmtCommPos :: Int
+                            }
               
 instance Show LexError where
     show (UndefToken s l c) = "Lexer Error: Undefined symbol  '" ++ s ++ 
                               "'\n             at line: " ++ show l ++
                               ", column: " ++ show c ++ "."
+    show UnexpectedEOF      = "Lexer Error: Unexpected EOF. Perhaps you" ++
+                              " miss a closing comment symbol '*)'"
+
+    show (UnmatchedCommClose l c) = "Lexer Error: Unmatched closing comment symbol '*)'"++ 
+                                  "\n             at line: " ++ show l ++
+                                  ", column: " ++ show c ++ "."
 
 }
