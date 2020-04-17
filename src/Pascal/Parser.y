@@ -6,61 +6,131 @@ import Pascal.Data
 import Pascal.Lexer
 }
 
-
+-- Happy definitions
 %name happyParser
 %tokentype { Token }
 
 %monad { Parser } { thenP } { returnP }
-%lexer { lexer } { Token _ TokenEOF }
+%lexer { lexer } { Token _ TkEOF }
 
+--List of possible tokens 
 %token
-        int             { Token _ (TokenInt $$) }
-        ID              { Token _ (TokenID $$)  }
-        '+'             { Token _ (TokenOp "+")   }
-        '-'             { Token _ (TokenOp "-")   }
-        '*'             { Token _ (TokenOp "*")   }
-        '/'             { Token _ (TokenOp "/")   }
-        '='             { Token _ (TokenOp "=")   }
-        '('             { Token _ (TokenK  "(")   }
-        ')'             { Token _ (TokenK  ")")   }
-        'begin'         { Token _ (TokenK "begin") }
-        'end'           { Token _ (TokenK "end")  }
-        ':='            { Token _ (TokenK ":=")   }
-        'true'          { Token _ (TokenK "true") }
-        'false'         { Token _ (TokenK "false") }
-        'and'           { Token _ (TokenK "and") }
-        'not'           { Token _ (TokenK "not") }
+        -- < Reserved keywords > ------------------------
+        begin           { Token _ (TkGen "begin")   }
+        end             { Token _ (TkGen "end")     }
+        program         { Token _ (TkGen "program") }
+        var             { Token _ (TkGen "var")     }
+        if              { Token _ (TkGen "if")      }
+        else            { Token _ (TkGen "else")    }
+        case            { Token _ (TkGen "case")    }
+        then            { Token _ (TkGen "then")    }
+        of              { Token _ (TkGen "of")      }
+        while           { Token _ (TkGen "while" )  }
+        do              { Token _ (TkGen "do" )     }
+        for             { Token _ (TkGen "for" )    }
+        to              { Token _ (TkGen "to" )     }
+        break           { Token _ (TkGen "break" )  }
+        continue        { Token _ (TkGen "continue")   }
+        function        { Token _ (TkGen "function")   }
+        procedure       { Token _ (TkGen "procedure")  }
+
+        -- < built in functions > -----------------------
+        writeln         { Token _ (TkGen "writeln") }
+        readln          { Token _ (TkGen "readln")  }
+        sqrt            { Token _ (TkGen "sqrt")    }
+        sin             { Token _ (TkGen "sin")     }
+        cos             { Token _ (TkGen "cos")     }
+        ln              { Token _ (TkGen "ln")      }
+        exp             { Token _ (TkGen "exp")     }       
+
+        -- < Supported Data Types > ---------------------
+        real            { Token _ (TkGen "real")    }
+        boolean         { Token _ (TkGen "boolean") }
+
+        -- < Constants & ids > --------------------------
+        name            { Token _ (TkId  $$)        }
+        num             { Token _ (TkReal $$)       }
+        true            { Token _ (TkGen "true")    }
+        false           { Token _ (TkGen "false")   }
+
+        -- < Operators & separators > -------------------
+        '+'             { Token _ (TkGen "+")       }
+        '-'             { Token _ (TkGen "-")       }
+        '*'             { Token _ (TkGen "*")       }
+        '/'             { Token _ (TkGen "/")       }
+        '%'             { Token _ (TkGen "%")       }              
+        '='             { Token _ (TkGen "=")       }
+        '>='            { Token _ (TkGen ">=")      }
+        '<='            { Token _ (TkGen "<=")      }
+        '<'             { Token _ (TkGen "<")       }
+        '>'             { Token _ (TkGen ">")       }
+        '<>'            { Token _ (TkGen "<>")      }
+        and             { Token _ (TkGen "and")     }
+        or              { Token _ (TkGen "or")      }
+        not             { Token _ (TkGen "not")     }
+        ':='            { Token _ (TkGen ":=")      }
+        ';'             { Token _ (TkGen ";")       }
+        ':'             { Token _ (TkGen ":")       }
+        ','             { Token _ (TkGen ",")       }
+        '.'             { Token _ (TkGen ".")       }
+        '('             { Token _ (TkGen "(")       }
+        ')'             { Token _ (TkGen ")")       }
 
 -- associativity of operators in reverse precedence order
-%nonassoc '>' '>=' '<' '<=' '==' '!='
+%nonassoc '>' '>=' '<' '<=' '==' '<>'
 %left '+' '-'
 %left '*' '/'
 %nonassoc ':='
 %%
 
 -- Entry point
-Program :: {Program}
-    : 'begin' Statements 'end' { $2 }
+MainProgram  :: {MainProgram}
+             : program name ';' Program '.'     {($2,$4)}
 
--- Expressions
-Exp :: {Exp}
-    : '+' Exp { $2 } -- ignore Plus
-    | '-' Exp { Op1 "-" $2}
-    | Exp '+' Exp { Op2 "+" $1 $3 }
-    | Exp '*' Exp { Op2 "*" $1 $3 }
-    | '(' Exp ')' { $2 } -- ignore brackets
+Program      :: {Program}
+             : Declarations Block               { Program $2 $1 }
 
-BoolExp :: {BoolExp}
-    : 'true' { True_C }
-    | 'false' { False_C }
-    | 'not' BoolExp { Not $2 }
-    | BoolExp 'and' BoolExp { OpB "and" $1 $3 }
+-- < Execution Statements > ------------------------------------------
+Block        :: {Statement}
+             :  begin  end                      { Block [] }
+             |  begin Statements end            { Block $2 }
+                
+Statements   :: {[Statement]}
+             : Statement                        { [$1] }
+             | Statements ';' Statement ';'     {$3 : $1}
 
-Statements :: {[Statement]}
-    : { [] } -- nothing; make empty list
-    | Statement Statements { $1:$2 } -- put statement as first element of statements
+Statement    :: {Statement}
+             : name '('')'                      { ProcCall $1 [] }
+-- < Declaration Statements > ----------------------------------------
+Declarations :: {[Declaration]}
+             :                                  {[]} --No Declaration
+             | Declarations FuncDeclar          {$2:$1}
+             | Declarations VarDeclars          { $1 ++ $2 }
 
-Statement :: {Statement}
-    : ID ':=' Exp { Assign $1 $3 }
+FuncDeclar   :: {Declaration} --Declare procedure or function
+             : function name '(' FuncArgs ')' ':' DataType ';' Program ';' { Function $2 $4 $7 $9 }
+             | procedure name '(' FuncArgs ')' ';' Program ';' {Procedure $2 $4 $7}
+
+FuncArgs     :: {[(String, DataType)]}
+             : VarDeclars2                      {$1}
+             | FuncArgs ';' VarDeclars2         { $1 ++ $3 }
+
+VarDeclars   :: {[Declaration]}
+             : var VarDeclars2 ';'              { [ Variable s t | (s, t) <- $2 ] }
+
+VarDeclars2  :: {[(String, DataType)]}
+             : Names ':' DataType               { [(s,$3) | s <- $1] }
+
+Names        :: {[String]}
+             : name                              {[$1]}
+             | Names ',' name                    {$3:$1} 
+
+-- < Supported Types > -----------------------------------------------
+DataType     :: {DataType}
+            : real                              { RealT }
+            | boolean                           { BooleanT }
+
+
+
 
 {}

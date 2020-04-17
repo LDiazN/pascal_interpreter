@@ -65,11 +65,10 @@ tokens :-
   <0> boolean                               { readTkGen }
 
   -- < Operators & separators > --------------------------------
-  <0> [\+]|[\-]|[\*]|[\/]|[\%]              { readAritOper }
-  <0> [\=]|\>\=|\<\=|\<|\>|\<\>             { readRelOper }
-  <0> and|or|not                            { readBoolOper }
+  <0> [\+]|[\-]|[\*]|[\/]|[\%]              { readTkGen }
+  <0> [\=]|\>\=|\<\=|\<|\>|\<\>             { readTkGen }
+  <0> and|or|not                            { readTkGen }
   <0> \:\=                                  { readTkGen }
-  <0> \=                                    { readTkGen }
   <0> \;                                    { readTkGen }
   <0> \:                                    { readTkGen }
   <0> \,                                    { readTkGen }
@@ -113,9 +112,6 @@ program = 0
 
 
 ----- << Token Reader functions >> -----
--- Given a token without associated value, return an action 
-readTok :: TokenClass -> AlexInput -> Int64 -> Alex Token
-readTok t (alxpsn, _, _, _) _ = return $ Token alxpsn t 
 
 readTkGen :: AlexInput ->Int64 -> Alex Token
 readTkGen (pn@(AlexPn _ r c), _, s, _) l = 
@@ -131,25 +127,6 @@ readId :: AlexInput -> Int64 -> Alex Token
 readId (pn@(AlexPn _ r c), _, s, _) l = 
         return (Token pn . TkId . take (fromIntegral l) . B.unpack $ s)
 
--- Action to read a numeric operation
-readAritOper :: AlexInput -> Int64 -> Alex Token
-readAritOper (pn@(AlexPn _ r c), _, s, _) l = 
-        return (Token pn . TkAritOper . take (fromIntegral l) . B.unpack $ s)
-
--- Action to read a relational operation
-readRelOper :: AlexInput -> Int64 -> Alex Token
-readRelOper (pn@(AlexPn _ r c), _, s, _) l = 
-        return (Token pn . TkRelOper . take (fromIntegral l) . B.unpack $ s)
-
--- Action to read a bool operation
-readBoolOper :: AlexInput -> Int64 -> Alex Token
-readBoolOper (pn@(AlexPn _ r c), _, s, _) l = 
-        return (Token pn . TkBoolOper . take (fromIntegral l) . B.unpack $ s)
-
--- Action to read a built-in function
-readFunc :: AlexInput -> Int64 -> Alex Token
-readFunc (pn@(AlexPn _ r c), _, s, _) l = 
-        return (Token pn . TkBuiltfunc . take (fromIntegral l) . B.unpack $ s)
 
 -- Helper function to add an error to the error stack
 addError :: LexError -> Alex ()
@@ -229,44 +206,10 @@ alexEOF = do
 
 
 data TokenClass
- = TkAritOper    { aritOper :: String }    
- | TkRelOper     { relOper  :: String }    
- | TkBoolOper    { boolOper :: String }
- | TkGen         { tkVal    :: String } --Generic token
- | TkBoolType
- | TkRealType          
- | TkTrue      
- | TkFalse      
+ = TkGen         { tkVal    :: String } --Generic token     
  | TkReal        { realVal :: Float }
  | TkId          { idVal :: String }
  | TkEOF
- | TkBegin
- | TkEnd
- | TkProgram  
- | TkVar  
- | TkIf
- | TkElse
- | TkThen
- | TkCase
- | TkOf
- | TkBuiltfunc   { funcName :: String }
- | TkWhile  
- | TkFor
- | TkTo          
- | TkDo
- | TkBreak
- | TkContinue
- | TkFunction 
- | TkProcedure
- | TkAssign
- | TkInitVar
- | TkColon
- | TkSemiColon
- | TkComma
- | TkDot
- | TkParOpen
- | TkParClose
- 
 
  deriving (Eq, Show)
 

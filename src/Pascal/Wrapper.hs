@@ -13,7 +13,7 @@ import qualified Data.ByteString.Lazy.Char8 as BLC
 import           Data.List            (isPrefixOf)
 ----
 import           Pascal.Lexer         (runAlex)
-import           Pascal.Data          (Program)
+import           Pascal.Data          (MainProgram)
 import           Pascal.Parser        (happyParser)
 ----------------------------------------------------------------------------
 
@@ -29,7 +29,7 @@ data Error = Error
     , errClass :: ErrClass
     } deriving (Show, Eq)
 
-parse :: BL.ByteString -> Either Error Program
+parse :: BL.ByteString -> Either Error MainProgram
 parse s =
     -- Alex's error type is a String, that we have to parse here,
     -- otherwise we cannot get type-safe information out of 'parse'.
@@ -49,5 +49,5 @@ parse s =
                      | otherwise  -> Left (Error 0 0 (Message str))
 
 -- string version of above function for testing and running
-parseString :: String -> Either Error Program
+parseString :: String -> Either Error MainProgram
 parseString s = parse $ BLC.pack s 
