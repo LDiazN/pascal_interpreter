@@ -14,24 +14,28 @@ module Pascal.Data
     ) where
 
 -- Data-structure for  numeric expressions
-data Exp = BoolExpr { boolExpr :: BoolExp } | NumExpr { numExpr :: NumExp } 
+data Exp = BoolExpr { boolExpr :: BoolExp } --Boolean expression
+         | NumExpr  { numExpr :: NumExp }   --Numeric expresion
+         | FunExpr  { funExpId :: String, funExpArgs :: [Exp] } --Function call
+         | IdExpr   { idExpr :: String } --Simple id
+         | BinaryOp { opert :: String, oper1 :: Exp, oper2 :: Exp }
            deriving(Show, Eq)
 
-data NumExp = Op1{               --Unary numeric operation
+data NumExp = Op1{                --Unary numeric operation
                 unOp  :: String,  --Unary Operator
-                unOprn :: NumExp --argument expression
+                unOprn :: Exp     --argument expression
                 }
             | Op2{                  --Binary numeric operation
                 binOp :: String,    --Binary Operator
-                binOprn1 :: NumExp,--left argument 
-                binOprn2 :: NumExp --right argument
+                binOprn1 :: Exp,    --left argument 
+                binOprn2 :: Exp     --right argument
                 }
             | NumFunCall{            --Numeric function call
                 numFuncId :: String, --Function name
                 numFunArgs :: [Exp]  --Functions args  
                 }
-            | NumConst{           -- A constant value
-                numVal :: Float   -- Actual value (e.g. 10.0)
+            | NumConst{              -- A constant value
+                numVal :: Float      -- Actual value (e.g. 10.0)
                 }
             | NumVar{               -- A variable number
                 numVarId :: String  -- variable name (e.g. Var x)
@@ -41,26 +45,31 @@ data NumExp = Op1{               --Unary numeric operation
 
 -- Data-structure for boolean expressions
 data BoolExp = 
-              OpB{                  --Binary Boolean operation
+              OpB{                   --Binary Boolean operation
                 boolOp :: String,    --Binary Operator
-                boolOprn1 :: NumExp,--left argument 
-                boolOprn2 :: NumExp --right argument
+                boolOprn1 :: Exp,--left argument 
+                boolOprn2 :: Exp --right argument
                 }
             | Not{
-                notExpr :: BoolExp --Negated expresion
+                notExpr :: Exp --Negated expresion
                 }
             | BoolFunCall{            --Boolean function call
                 boolFuncId :: String, --Function name
                 boolFunArgs :: [Exp]  --Functions args  
                 }
-            | TrueC                 -- True constant
+            | TrueC                  -- True constant
             | FalseC                 -- False constant
             | RelOp{  --Relational operation
                 relOp :: String,
-                relOprn1 :: NumExp,
-                relOprn2 :: NumExp
-            }
-            | BoolVar{              -- A variable number
+                relOprn1 :: Exp,
+                relOprn2 :: Exp
+                }
+            | CompOp{
+                compOp   :: String, -- = or <>
+                compArg1 :: Exp,  
+                compArg2 :: Exp
+                }
+            | BoolVar{               -- A variable number
                 boolVarId :: String  -- variable name (e.g. Var x)
                 }
             deriving(Show, Eq)
@@ -97,7 +106,7 @@ data Statement = Assign{                -- Variable assignment
                     } 
                 -- If statement
                 | If {
-                    ifCond :: BoolExp,    -- condition that must be true
+                    ifCond :: Exp,        -- condition that must be true
                     succInst :: Statement,-- Instruction executed when cond=true
                     failInst :: Statement,-- Executed when cond = false 
                     ibid     :: Int       -- if bid
@@ -114,25 +123,29 @@ data Statement = Assign{                -- Variable assignment
                 -- For loop
                 | For{
                     forIter     :: String,     --For iterator name
-                    forInitVal  :: Float,      --Iterator init valye
-                    forEndVal   :: Float,      --Iterator final value
-                    forBody     :: [Statement],--For instructions
+                    forInitVal  :: Exp,        --Iterator init valye
+                    forEndVal   :: Exp,        --Iterator final value
+                    forBody     :: Statement,  --For instructions
+                    forIncr     :: String,     --Increase iterator 
                     fbid        :: Int         --For block id
                     }
                 -- While loop
                 | While{
-                    whCond :: BoolExp,    --While condition 
-                    whBody :: [Statement],--while instructions
+                    whCond :: Exp,        --While condition 
+                    whBody :: Statement,--while instructions
                     wbid   :: Int         --While block id 
                     }
+                -- Function & procedure calls
                 | ProcCall{
                     procName :: String,
                     procCallArgs :: [Exp]
-                    }
+                }
                 -- Block
                 | Block {   --Instruction block
                     blockInsts :: [Statement]
                     } 
+                | Break
+                | Continue
                 | Skip
                 deriving (Show, Eq)
 

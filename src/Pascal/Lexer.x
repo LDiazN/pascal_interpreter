@@ -22,6 +22,9 @@ module Pascal.Lexer
   , runAlex
   , tokenToPosN
   , tokenizer
+  , lexerUtil
+  , getErrors
+  , LexError(..)
   )
 where
 
@@ -50,11 +53,11 @@ tokens :-
   <0> then                                  { readTkGen }
   <0> case                                  { readTkGen }
   <0> of                                    { readTkGen }
-  <0> writeln|readln|sqrt|sin|cos|ln|exp    { readTkGen }
   <0> while                                 { readTkGen }
   <0> do                                    { readTkGen }
   <0> for                                   { readTkGen }
   <0> to                                    { readTkGen }
+  <0> downto                                { readTkGen }
   <0> break                                 { readTkGen }
   <0> continue                              { readTkGen }
   <0> function                              { readTkGen }
@@ -79,7 +82,7 @@ tokens :-
   -- < Constants & names > -------------------------------------
   <0> true                                  { readTkGen }
   <0> false                                 { readTkGen }
-  <0> $digit+\.$digit+                      { readReal }
+  <0> $digit+[\.]$digit+                      { readReal }
   <0> $alpha [$alpha $digit \_ \']*         { readId }
 
   -- < Unvalid Tokens > ----------------------------------------
@@ -150,6 +153,7 @@ addErrUnMtchComm (AlexPn _ ln c, _, s, _) l = do
       alexMonadScan
 
 ----- << Alex analyzer functions >> -----
+
 -- Main function: Returns a token list from a String
 -- This function returns a list of tokens given string
 tokenizer :: String -> Either String [Token]
@@ -167,7 +171,7 @@ tokenizer s = do
                               errs   <- getErrors
                               case errs of 
                                 [] -> return []
-                                _  -> alexError . unlines . map show $ errs
+                                _  -> alexError . ("lexical error at line "++) . unlines . map show $ errs
                               return []
             Token _ _     -> do
                               tks <- loop
@@ -175,6 +179,25 @@ tokenizer s = do
              
     runAlex (B.pack s) loop
         
+
+-- In case of monadic threaded parser:
+lexerUtil :: Alex (Either String Token)
+lexerUtil = do
+  tk <- alexMonadScan
+  case tk of
+    Token _ TkEOF ->do  
+          -- Now that we reached the end of file, 
+          -- we have to check if there was some error
+
+          -- check if all the comments are closed
+          stcode <- alexGetStartCode
+          when (stcode==comment) $ addError UnexpectedEOF
+          errs   <- getErrors
+          case errs of 
+            [] -> return $ Right tk
+            _  -> return $ Left . ("lexical error at line "++) . unlines . map show $ errs
+          return $ Right tk
+    _     -> return $ Right tk
 
 -- user state data type
 data AlexUserState = AlexUserState{

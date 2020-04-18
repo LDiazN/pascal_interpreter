@@ -14,17 +14,24 @@ returnP :: a -> Parser a
 returnP = return
 
 alexShowError :: (Show t, Show t1) => (t, t1, Maybe String) -> Alex a
-alexShowError (line, column, e) = alexError $ "show-error: " ++ (show (line, column, e))
+alexShowError (line, column, e) = alexError $ "show-error: " ++ show (line, column, e)
 
-alexGetPosition :: Alex (AlexPosn)
+alexGetPosition :: Alex AlexPosn
 alexGetPosition = Alex $ \s@AlexState{alex_pos=pos} -> Right (s, pos)
 
 happyError :: Parser a
 happyError = do
   (AlexPn _ line col) <- alexGetPosition
+  l <- getErrors
   alexShowError (line, col, Nothing)
 
 -- Link the lexer and the parser:
+--lexer :: (Token -> Parser a) -> Parser a
+--lexer f = lexerUtil >>= f
 
 lexer :: (Token -> Parser a) -> Parser a
-lexer f = alexMonadScan >>= f
+lexer f = do 
+      tk <- lexerUtil 
+      case tk of
+        Left s  -> alexError $ "lexical error at line " ++ s
+        Right t -> f t
