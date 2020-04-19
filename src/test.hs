@@ -9,7 +9,7 @@ main = do
     (filename:[]) <- getArgs
     fileContent   <- readFile filename
     putStrLn "Tokenizing..."
-    case parseString fileContent of
+    case parse' fileContent of
         Left s    -> print s
-        Right tks -> print tks
+        Right tks -> putStr . printMainProg $ tks
 

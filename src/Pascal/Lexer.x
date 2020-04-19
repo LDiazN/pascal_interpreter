@@ -39,7 +39,6 @@ $digit = 0-9                    -- digits
 $alpha = [a-zA-Z]               -- alphabetic characters
 
 
--- TODO: Map symbols into token types (with or without parameters)
 tokens :-
 
   <0> $white+                               ; -- remove multiple white-spaces
@@ -82,7 +81,8 @@ tokens :-
   -- < Constants & names > -------------------------------------
   <0> true                                  { readTkGen }
   <0> false                                 { readTkGen }
-  <0> $digit+[\.]$digit+                      { readReal }
+  <0> $digit+[\.]$digit+                    { readReal }
+  <0> $digit+                               { readReal }
   <0> $alpha [$alpha $digit \_ \']*         { readId }
 
   -- < Unvalid Tokens > ----------------------------------------
@@ -171,7 +171,7 @@ tokenizer s = do
                               errs   <- getErrors
                               case errs of 
                                 [] -> return []
-                                _  -> alexError . ("lexical error at line "++) . unlines . map show $ errs
+                                _  -> alexError . unlines . map show $ errs
                               return []
             Token _ _     -> do
                               tks <- loop
@@ -234,7 +234,11 @@ data TokenClass
  | TkId          { idVal :: String }
  | TkEOF
 
- deriving (Eq, Show)
+instance Show TokenClass where
+  show (TkGen s) = s
+  show (TkReal f) = show f
+  show (TkId s) = s
+  show TkEOF = "[EOF]"
 
 data LexError = UndefToken{ undefTok :: String, 
                             undfline :: Int, 

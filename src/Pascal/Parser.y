@@ -11,7 +11,6 @@ import Pascal.Lexer
 %tokentype { Token }
 
 %monad { Parser } { thenP } { returnP }
-%lexer { lexer }  { Token _ TkEOF }
 
 --List of possible tokens 
 %token

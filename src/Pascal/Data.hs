@@ -10,7 +10,8 @@ module Pascal.Data
         Declaration(..),
         Program(..),
         DataType(..),
-        MainProgram
+        MainProgram,
+        printMainProg
     ) where
 
 -- Data-structure for  numeric expressions
@@ -19,7 +20,7 @@ data Exp = BoolExpr { boolExpr :: BoolExp } --Boolean expression
          | FunExpr  { funExpId :: String, funExpArgs :: [Exp] } --Function call
          | IdExpr   { idExpr :: String } --Simple id
          | BinaryOp { opert :: String, oper1 :: Exp, oper2 :: Exp }
-           deriving(Show, Eq)
+           deriving(Eq)
 
 data NumExp = Op1{                --Unary numeric operation
                 unOp  :: String,  --Unary Operator
@@ -40,7 +41,7 @@ data NumExp = Op1{                --Unary numeric operation
             | NumVar{               -- A variable number
                 numVarId :: String  -- variable name (e.g. Var x)
                 }
-            deriving(Show, Eq)
+            deriving(Eq)
                 
 
 -- Data-structure for boolean expressions
@@ -72,7 +73,7 @@ data BoolExp =
             | BoolVar{               -- A variable number
                 boolVarId :: String  -- variable name (e.g. Var x)
                 }
-            deriving(Show, Eq)
+            deriving(Eq)
 
 -- Enum for the supported built in types
 data DataType   = RealT 
@@ -96,7 +97,7 @@ data Declaration = --Symbol declaration
                         procArgs :: [(String,DataType)],
                         procBody :: Program
                         }
-                deriving(Show, Eq)
+                deriving(Eq)
                 
 
 -- Data-structure for statements
@@ -147,7 +148,7 @@ data Statement = Assign{                -- Variable assignment
                 | Break
                 | Continue
                 | Skip
-                deriving (Show, Eq)
+                deriving ( Eq)
 
 
 -- Data-structure for variables
@@ -166,6 +167,128 @@ data Program = Program{
                                             -- declariations are independent on
                                             -- the program statements
             }
-            deriving(Show, Eq)
+            deriving(Eq)
 
 type MainProgram = (String,Program)
+
+------------------------------------------------------------
+-- < Helper function to print program > --------------------
+
+instance Show Declaration where
+    show (Variable s d) = "[Var] " ++ s ++ " : " ++ show d
+
+    show f@Function{}   = "[Function] " ++ fname ++ 
+                          "(" ++ fargs ++ ")" ++ ftype ++
+                          fbody
+        where 
+            fname  = funcId f
+            fargs' = map (\(a , b) -> a ++ " : " ++ show b ++ "; ") . funcArgs $ f
+            fargs  = concat fargs'
+            ftype  = " : " ++ (show . funcType $ f) 
+            fbody' = funcBody f
+            fbody  = unlines . map ("  "++) . lines . show $ fbody'
+
+    show p@Procedure{}   = "[Procedure] " ++ pname ++ 
+                           "(" ++ pargs ++ ")" ++ pbody
+        where 
+            pname  = procId p
+            pargs' = map (\(a , b) -> a ++ " : " ++ show b ++ "; ") . procArgs $ p
+            pargs  = concat pargs'
+            pbody' = procBody p
+            pbody  = unlines . map ("  "++) . lines . show $ pbody'
+
+instance Show Statement where
+    show b@Block{} = "BEGIN\n" ++ stmts ++ "END\n"
+        where 
+            stmts' = blockInsts b
+            stmts  =  unlines . map ("  "++) . lines . concatMap show $ stmts'
+    show (Assign vid exp) = vid ++ " := " ++  show exp ++ "\n"
+
+    show mif@If{}  = "IF (" ++ expr ++ ") " ++ "[ BID: " ++ bid ++ " ]\n" ++
+                     sccbody ++ "ELSE: " ++ fbody   
+        where 
+            bid = show . ibid $ mif 
+            expr = show . ifCond $ mif
+            sccbody = printBody . succInst $ mif
+            fbody = case failInst mif of
+                        Skip -> "  [NO ELSE STATEMENT]\n"
+                        stm  -> printBody stm
+
+            printBody :: Statement -> String
+            printBody = unlines . map ("  "++) . lines . show  
+
+    show f@For{}   = "FOR " ++ fvar ++ ":= " ++ expr1 ++ " " ++ how ++ " " ++ expr2 ++ " DO " ++
+                     "[ BID: " ++ bid ++ "]\n" ++ fbody ++ "[END FOR]\n"
+        where 
+            fvar  = forIter f
+            expr1 = show . forInitVal $ f
+            expr2 = show . forEndVal $ f
+            how   = forIncr f
+            bid   = show . fbid $ f
+            fbody = unlines . map ("  "++) . lines . show . forBody $ f
+    
+    show w@While{} = "WHILE " ++ expr ++ " DO [ BID: " ++ bid ++ " ] \n" ++
+                     wbody
+        where 
+            expr = show . whCond $ w
+            bid  = show . wbid $ w
+            wbody = unlines . map ("  "++) . lines . show . whBody $ w
+        
+    show p@ProcCall{} = "[FUN/PROC CALL] " ++ pname ++ "( " ++ pargs ++ ")\n"
+        where 
+            pname = procName p
+            pargs = concatMap ((++ "; ") . show) . procCallArgs $ p
+    
+    show c@Case{}    = "CASE " ++ cexpr ++ " : [ BID: " ++ bid ++ " ]\n" ++ 
+                       cases ++ "END\n"
+        where 
+            cexpr = show . caseExp $ c
+            bid  = show . cbid $ c
+            cases' = caseGuards c
+            cases  = unlines . map (("  "++) . (\(a,b) -> show a ++ " : " ++ show b)) $ cases'
+    
+    show Break = "BREAK"
+    show Continue = "CONTINUE"
+
+instance Show Program where
+    show (Program pins pdec) = strdec ++ "\n" ++ show pins
+        where 
+            strdec = unlines . map show $ pdec
+
+instance Show Exp where
+    show BoolExpr{ boolExpr = b} = show b
+    show NumExpr{numExpr = n} = show n
+    show FunExpr{funExpId=id, funExpArgs = args} = id ++ "(" ++ args' ++ ")"
+        where 
+            args' = concatMap ((++ "; ") . show ) args
+    show IdExpr{idExpr = id} = id
+    show BinaryOp{opert = o, oper1 = op1, oper2 = op2} = "( " ++ o ++ " (" ++
+                                show op1 ++") ("++ show op2 ++ ") )"
+
+instance Show NumExp where
+    show Op1{ unOp = o, unOprn = e } = "( " ++ o ++ " " ++ show e ++ " )"
+    show Op2{ binOp = o, binOprn1 = op1, binOprn2 = op2 } = "( " ++ o ++ 
+                    "(" ++show op1++") (" ++ show op2 ++ "))"
+    show (NumConst n) = show n
+    show (NumVar s)  = s
+    show (NumFunCall s a) = s ++ "( " ++ args ++ ")"
+        where 
+            args = concatMap ((++ "; ") . show) a
+
+instance Show BoolExp where
+    show OpB{boolOp = o, boolOprn1 = op1, boolOprn2 = op2} = "( " ++ o ++ 
+                            " (" ++ show op1 ++ ") (" ++ show op2 ++ ")"
+    show Not{notExpr = ne} = "NOT (" ++ show ne ++ ")"
+    show BoolFunCall{boolFuncId = id, boolFunArgs = args} = id ++ "(" ++ args' ++ ")"
+        where args' = concatMap ((++ "; ") . show) args
+
+    show TrueC = "true"
+    show FalseC = "false"
+    show BoolVar{boolVarId = id} = id
+    show RelOp{relOp = o, relOprn1 = op1, relOprn2 = op2} = "( " ++ o ++ 
+                            " (" ++ show op1 ++ ") (" ++ show op2 ++ ")"
+    show CompOp{compOp = o, compArg1 = op1, compArg2 = op2} = "( " ++ o ++ 
+                            " (" ++ show op1 ++ ") (" ++ show op2 ++ ")"
+
+printMainProg :: MainProgram -> String
+printMainProg (s, p) = "[PROGRAM: " ++ s ++ "]\n" ++ show p
