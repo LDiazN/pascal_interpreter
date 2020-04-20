@@ -39,7 +39,7 @@ import Pascal.Lexer
         boolean         { Token _ (TkGen "boolean") }
 
         -- < Constants & ids > --------------------------
-        name            { Token _ (TkId  $$)        }
+        name            { Token _ (TkId  _)        }
         num             { Token _ (TkReal $$)       }
         true            { Token _ (TkGen "true")    }
         false           { Token _ (TkGen "false")   }
@@ -80,9 +80,9 @@ import Pascal.Lexer
 
 -- Entry point
 MainProgram  :: {MainProgram}
-             : program name ';' Program '.'     {($2,$4)}
+             : program name ';' Program '.'     {(getId $2,$4)}
 
-Program      :: {Program}
+Program      :: { Program }
              : Declarations Block               { Program $2 $1 }
 
 -- < Execution Statements > ------------------------------------------
@@ -107,15 +107,11 @@ Statement    :: { Statement }
              | continue                         { Continue }
 
 Assign       :: { Statement }
-             : name ':=' Expr                   { Assign $1 $3 }
+             : name ':=' Expr                   { Assign (getId $1) $3 }
 
 FuncCall     :: {(String, [Exp])}
-             : name'('')'                      { ($1, []) }
-             | name'(' FuncArgs ')'            { ($1, $3) }
-
-
-
-             
+             : name'('')'                      { (getId $1, []) }
+             | name'(' FuncArgs ')'            { (getId $1, $3) }
 
 FuncArgs     :: {[Exp]}
              : Expr                             { [$1] }
@@ -146,9 +142,9 @@ WhileDo      :: { Statement }
 
 ForDo        :: { Statement }
              : for name ':=' Expr to Expr 
-                             do Statement       { For $2 $4 $6 $8 "to" (-1) }
+                             do Statement       { For (getId $2) $4 $6 $8 "to" (-1) }
              | for name ':=' Expr downto Expr 
-                             do Statement       { For $2 $4 $6 $8 "downto" (-1) }
+                             do Statement       { For (getId $2) $4 $6 $8 "downto" (-1) }
 
 -- < Declaration Statements > ----------------------------------------
 Declarations :: {[Declaration]}
@@ -157,20 +153,20 @@ Declarations :: {[Declaration]}
              | Declarations VarDeclars          { $1 ++ $2 }
 
 FuncDeclar   :: {Declaration} --Declare procedure or function
-             : function name '(' FuncArgsDec ')' ':' DataType ';' Program ';' { Function $2 $4 $7 $9 }
-             | procedure name '(' FuncArgsDec ')' ';' Program ';' {Procedure $2 $4 $7}
+             : function name '(' FuncArgsDec ')' ':' DataType ';' Program ';' { Function (getId $2) $4 $7 $9 (getPos $2)}
+             | procedure name '(' FuncArgsDec ')' ';' Program ';' {Procedure (getId $2) $4 $7 (getPos $2)}
 
 FuncArgsDec  :: {[(String, DataType)]}
-             : VarDeclars2                      {$1}
-             | FuncArgsDec ';' VarDeclars2      { $1 ++ $3 }
+             : VarDeclars2                      {[ (getId t, dt) | (t, dt) <- $1]}
+             | FuncArgsDec ';' VarDeclars2      { $1 ++ [ (getId t, dt) | (t, dt) <- $3] }
 
 VarDeclars   :: {[Declaration]}
-             : var VarDeclars2 ';'              { [ Variable s t | (s, t) <- $2 ] }
+             : var VarDeclars2 ';'              { [ Variable (getId s) t (getPos s) | (s, t) <- $2 ] }
 
-VarDeclars2  :: {[(String, DataType)]}
+VarDeclars2  :: {[(Token, DataType)]}
              : Names ':' DataType               { [(s,$3) | s <- $1] }
 
-Names        :: {[String]}
+Names        :: {[Token]}
              : name                             {[$1]}
              | Names ',' name                   {$3:$1} 
 
@@ -195,7 +191,7 @@ Term         :: { Exp }
 
 Factor       :: { Exp }                                 
              :  num                             { NumExpr (NumConst $1) }
-             |  name                            { IdExpr $1 }
+             |  name                            { IdExpr (getId $1) }
              |  true                            { BoolExpr TrueC }
              |  false                           { BoolExpr FalseC }
              | '(' Expr ')'                     { $2 }

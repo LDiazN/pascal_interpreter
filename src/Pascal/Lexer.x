@@ -25,6 +25,8 @@ module Pascal.Lexer
   , lexerUtil
   , getErrors
   , LexError(..)
+  , getId
+  , getPos
   )
 where
 
@@ -215,7 +217,7 @@ setErrors e = Alex $ \s@AlexState{ alex_ust = ust } -> Right (s{alex_ust = ust{e
 
 
 
------- << Token Data Types >> ------
+------ << Token Data Types >> --------
 data Token = Token AlexPosn TokenClass
   deriving (Show)
 
@@ -233,6 +235,14 @@ data TokenClass
  | TkReal        { realVal :: Float }
  | TkId          { idVal :: String }
  | TkEOF
+
+-- get Position of a token 
+getPos :: Token -> (Int, Int)
+getPos (Token (AlexPn _ l c) _) = (l,c)
+
+getId  :: Token -> String
+getId (Token _ (TkId s)) = s
+getId t = error "error calling getId : this is not a TkId: "++ show t 
 
 instance Show TokenClass where
   show (TkGen s) = s

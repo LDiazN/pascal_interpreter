@@ -84,18 +84,21 @@ data DataType   = RealT
 data Declaration = --Symbol declaration
                     Variable{                 --Variable declaration
                         varId :: String,      --Variable name
-                        varType :: DataType   --Variable type
+                        varType :: DataType,  --Variable type
+                        vDeclpos:: (Int, Int) --Declaration position
                         }  
                  |  Function{
                         funcId :: String,               --function name
                         funcArgs :: [(String,DataType)],--function args
                         funcType :: DataType,    -- function return type    
-                        funcBody :: Program      -- function code
+                        funcBody :: Program,     -- function code
+                        fDeclPos :: (Int, Int)   --Declaration position
                         }
                  |  Procedure{
-                        procId :: String,               --
-                        procArgs :: [(String,DataType)],
-                        procBody :: Program
+                        procId :: String,               -- Proced. name
+                        procArgs :: [(String,DataType)],-- Proced. args
+                        procBody :: Program,   --Proced. code
+                        pDeclPos :: (Int, Int) --Declaration position
                         }
                 deriving(Eq)
                 
@@ -175,7 +178,7 @@ type MainProgram = (String,Program)
 -- < Helper function to print program > --------------------
 
 instance Show Declaration where
-    show (Variable s d) = "[Var] " ++ s ++ " : " ++ show d
+    show (Variable s d _) = "[Var] " ++ s ++ " : " ++ show d
 
     show f@Function{}   = "[Function] " ++ fname ++ 
                           "(" ++ fargs ++ ")" ++ ftype ++
@@ -247,8 +250,8 @@ instance Show Statement where
             cases' = caseGuards c
             cases  = unlines . map (("  "++) . (\(a,b) -> show a ++ " : " ++ show b)) $ cases'
     
-    show Break = "BREAK"
-    show Continue = "CONTINUE"
+    show Break = "BREAK\n"
+    show Continue = "CONTINUE\n"
 
 instance Show Program where
     show (Program pins pdec) = strdec ++ "\n" ++ show pins
