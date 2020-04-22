@@ -83,12 +83,12 @@ MainProgram  :: {MainProgram}
              : program name ';' Program '.'     {(getId $2,$4)}
 
 Program      :: { Program }
-             : Declarations Block               { Program $2 $1 }
+             : Declarations Block               { Program $2  (reverse $1) }
 
 -- < Execution Statements > ------------------------------------------
 Block        :: {Statement}
              :  begin  end                      { Block [] }
-             |  begin Statements end            { Block $2 }
+             |  begin Statements end            { Block (reverse $2) }
                 
 Statements   :: { [Statement] }
              : Statement                        { [$1] }
@@ -107,7 +107,7 @@ Statement    :: { Statement }
              | continue                         { Continue }
 
 Assign       :: { Statement }
-             : name ':=' Expr                   { Assign (getId $1) $3 }
+             : name ':=' Expr                   { Assign (getId $1) $3 (getPos $1) }
 
 FuncCall     :: {(String, [Exp])}
              : name'('')'                      { (getId $1, []) }
@@ -150,15 +150,15 @@ ForDo        :: { Statement }
 Declarations :: {[Declaration]}
              :                                  {[]} --No Declaration
              | Declarations FuncDeclar          {$2:$1}
-             | Declarations VarDeclars          { $1 ++ $2 }
+             | Declarations VarDeclars          { $2 ++ $1 }
 
 FuncDeclar   :: {Declaration} --Declare procedure or function
              : function name '(' FuncArgsDec ')' ':' DataType ';' Program ';' { Function (getId $2) $4 $7 $9 (getPos $2)}
-             | procedure name '(' FuncArgsDec ')' ';' Program ';' {Procedure (getId $2) $4 $7 (getPos $2)}
+             | procedure name '(' FuncArgsDec ')' ';' Program ';' {Function (getId $2) $4 NoneT $7 (getPos $2)}
 
 FuncArgsDec  :: {[(String, DataType)]}
-             : VarDeclars2                      {[ (getId t, dt) | (t, dt) <- $1]}
-             | FuncArgsDec ';' VarDeclars2      { $1 ++ [ (getId t, dt) | (t, dt) <- $3] }
+             : VarDeclars2                      {reverse [ (getId t, dt) | (t, dt) <- $1]}
+             | FuncArgsDec ';' VarDeclars2      { $1 ++ reverse [ (getId t, dt) | (t, dt) <- $3] }
 
 VarDeclars   :: {[Declaration]}
              : var VarDeclars2 ';'              { [ Variable (getId s) t (getPos s) | (s, t) <- $2 ] }
@@ -191,7 +191,7 @@ Term         :: { Exp }
 
 Factor       :: { Exp }                                 
              :  num                             { NumExpr (NumConst $1) }
-             |  name                            { IdExpr (getId $1) }
+             |  name                            { IdExpr (getId $1) (getPos $1) }
              |  true                            { BoolExpr TrueC }
              |  false                           { BoolExpr FalseC }
              | '(' Expr ')'                     { $2 }

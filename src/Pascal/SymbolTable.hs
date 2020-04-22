@@ -1,4 +1,4 @@
-module SymbolTable where
+module Pascal.SymbolTable where
 
 import qualified Pascal.Data as D
 import qualified Data.Map as M
@@ -12,30 +12,27 @@ import Data.Maybe
 -- This Data contains aditional info depending
 -- on the symbol type.
 data SymType =  Program 
-             |  Function{
+             |  Function{ -- Functions with Non return type are procedures
                     fbid  :: Int, -- bid (Scope) for this function
-                    fdecl :: D.Declaration -- Declaration data 
-                }
-             |  Procedure{
-                    pbid  :: Int, -- scope for his procedure
-                    pdecl :: D.Declaration --Declaration data
+                    funcArgs :: [(String,D.DataType)],--function args
+                    funcType :: D.DataType,    -- function return type    
+                    funcBody :: D.Program   
                 }
              |  BoolVar{
-                    bval    :: Bool,     --boolean value
-                    bdecPos :: (Int,Int) --Declaration pos 
+                    bval :: Bool     --boolean value
                 }
             
              |  RealVar{
-                    rval    :: Float,    --real value
-                    rdecPos :: (Int,Int) --Declaration pos 
+                    rval :: Float    --real value
                 }
              deriving(Show, Eq)
             
 -- Data structure to represent a symbol
 data Symbol = Symbol{
-                symId :: String,   --Symbol name, like the name of a var
-                symScope :: Int,   --Declaration scope of this symbol
-                symType :: SymType --Aditional data for this symbol
+                symId :: String,     --Symbol name, like the name of a var
+                symScope :: Int,     --Declaration scope of this symbol
+                symType :: SymType,  --Aditional data for this symbol
+                symPos  :: (Int,Int) --declaration position (ln,col)
                 } deriving (Show, Eq)
         
 -- symbol table:
@@ -55,7 +52,7 @@ newTable :: SymbolTable
 newTable = SymbolTable{
             symMap = M.empty,
             scopeStk = [0],
-            scopeCnt = 0
+            scopeCnt = 1
             }
 
 -- Creates a new empty scope
@@ -140,3 +137,73 @@ removeSym s st =
                     Just l  -> st{symMap = 
                                 M.insert symName (filter (/= s) l) smap } 
     in newSt
+
+------------------------------------------------------------------
+-- < Symbol Table utilities > ------------------------------------
+
+-- Replace the value of the first value that checks the predicate
+replace :: Eq a => [a] -> (a->Bool) -> a -> [a]
+replace [] _ _ = []
+replace (x:xs) f y 
+    | f x = y:xs
+    | otherwise = x : replace xs f y
+
+-- change the value of this variable 
+setRealVal :: String -> Float -> SymbolTable -> SymbolTable
+setRealVal s x st = 
+    let 
+        smap = symMap st
+        checkSym = findSym s st
+        sym = fromJust checkSym
+        newSym = setRealVal' sym x 
+        slist = fromMaybe [] (M.lookup s smap)
+        newList = replace slist (==sym) newSym
+        --Aux function: return the same symbol with its value
+        -- updated
+        setRealVal' :: Symbol -> Float -> Symbol
+        setRealVal' sym@Symbol{symType=rv@RealVar{}} v = 
+                    sym{ symType = rv{rval = v} }
+
+        newSt = case checkSym of 
+                    Nothing   -> st
+                    Just _    -> st{ symMap = M.insert s newList smap }
+    in newSt
+
+-- change the value of this variable 
+setBoolVal :: String -> Bool -> SymbolTable -> SymbolTable
+setBoolVal s x st = 
+    let 
+        smap = symMap st
+        checkSym = findSym s st
+        sym = fromJust checkSym
+        newSym = setBoolVal' sym x 
+        slist = fromMaybe [] (M.lookup s smap)
+        newList = replace slist (==sym) newSym
+        --Aux function: return the same symbol with its value
+        -- updated
+        setBoolVal' :: Symbol -> Bool -> Symbol
+        setBoolVal' sym@Symbol{symType=rv@BoolVar{}} v = 
+                    sym{ symType = rv{bval = v} }
+
+        newSt = case checkSym of 
+                    Nothing   -> st
+                    Just _    -> st{ symMap = M.insert s newList smap }
+    in newSt
+
+-- Check if the given id corresponds to a symbol with a specific condition.
+-- This is useful to check the type of the symbol. If the symbol does not 
+-- exist, return false
+checkSym :: String -> (Symbol -> Bool)  -> SymbolTable -> Bool
+checkSym s f st = maybe False f (findSym s st)
+
+isBoolVar :: Symbol -> Bool
+isBoolVar Symbol{symType = BoolVar{}} = True
+isBoolVar _ = False
+
+isRealVar :: Symbol -> Bool
+isRealVar Symbol{symType = RealVar{}} = True
+isRealVar _ = False
+
+isFunc :: Symbol -> Bool
+isFunc Symbol{symType = Function{}} = True
+isFunc _ = False

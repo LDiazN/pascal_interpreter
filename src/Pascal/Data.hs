@@ -11,14 +11,20 @@ module Pascal.Data
         Program(..),
         DataType(..),
         MainProgram,
-        printMainProg
+        printMainProg,
+        builtInFuns
     ) where
 
--- Data-structure for  numeric expressions
+---------------------------------------------------------------------------------
+import qualified Data.Set as S
+---------------------------------------------------------------------------------
+
+
+-- Data-structure for generic expressions
 data Exp = BoolExpr { boolExpr :: BoolExp } --Boolean expression
          | NumExpr  { numExpr :: NumExp }   --Numeric expresion
          | FunExpr  { funExpId :: String, funExpArgs :: [Exp] } --Function call
-         | IdExpr   { idExpr :: String } --Simple id
+         | IdExpr   { idExpr :: String, refPos :: (Int,Int) } --Simple id
          | BinaryOp { opert :: String, oper1 :: Exp, oper2 :: Exp }
            deriving(Eq)
 
@@ -81,8 +87,8 @@ data DataType   = RealT
                 | NoneT 
                 deriving(Show,Eq,Enum)
 
-data Declaration = --Symbol declaration
-                    Variable{                 --Variable declaration
+--Symbol declaration
+data Declaration =  Variable{                 --Variable declaration
                         varId :: String,      --Variable name
                         varType :: DataType,  --Variable type
                         vDeclpos:: (Int, Int) --Declaration position
@@ -94,19 +100,14 @@ data Declaration = --Symbol declaration
                         funcBody :: Program,     -- function code
                         fDeclPos :: (Int, Int)   --Declaration position
                         }
-                 |  Procedure{
-                        procId :: String,               -- Proced. name
-                        procArgs :: [(String,DataType)],-- Proced. args
-                        procBody :: Program,   --Proced. code
-                        pDeclPos :: (Int, Int) --Declaration position
-                        }
                 deriving(Eq)
                 
 
 -- Data-structure for statements
 data Statement = Assign{                -- Variable assignment
                     assVarId :: String, -- Variable name
-                    assVal   :: Exp     -- Variable Value
+                    assVal   :: Exp,    -- Variable Value
+                    assPos   :: (Int,Int) -- statement position
                     } 
                 -- If statement
                 | If {
@@ -143,7 +144,7 @@ data Statement = Assign{                -- Variable assignment
                 | ProcCall{
                     procName :: String,
                     procCallArgs :: [Exp]
-                }
+                    }
                 -- Block
                 | Block {   --Instruction block
                     blockInsts :: [Statement]
@@ -151,14 +152,9 @@ data Statement = Assign{                -- Variable assignment
                 | Break
                 | Continue
                 | Skip
-                deriving ( Eq)
+                deriving (Eq)
 
-
--- Data-structure for variables
-
-
--- Data-structure for hole program
--- TODO: add declarations and other useful stuff
+-- Data-structure for whole program
 -- Hint: make a tuple containing the other ingredients
 data Program = Program{
                 progInstrs ::Statement,     --Set of statements to execute. 
@@ -174,38 +170,48 @@ data Program = Program{
 
 type MainProgram = (String,Program)
 
+builtInFuns :: S.Set String
+builtInFuns = S.fromList [
+                            "readln",
+                            "writeln",
+                            "sin",
+                            "cos",
+                            "sqrt",
+                            "exp",
+                            "ln"
+                        ]
+
 ------------------------------------------------------------
--- < Helper function to print program > --------------------
+-- < Helper functions to print program > --------------------
 
 instance Show Declaration where
     show (Variable s d _) = "[Var] " ++ s ++ " : " ++ show d
 
-    show f@Function{}   = "[Function] " ++ fname ++ 
+    show f@Function{}   = funKind ++ fname ++ 
                           "(" ++ fargs ++ ")" ++ ftype ++
                           fbody
         where 
             fname  = funcId f
             fargs' = map (\(a , b) -> a ++ " : " ++ show b ++ "; ") . funcArgs $ f
             fargs  = concat fargs'
-            ftype  = " : " ++ (show . funcType $ f) 
+            ftype' = funcType f
+            ftype  = case ftype' of 
+                        NoneT -> ""
+                        _     -> " : " ++ show ftype' 
             fbody' = funcBody f
             fbody  = unlines . map ("  "++) . lines . show $ fbody'
-
-    show p@Procedure{}   = "[Procedure] " ++ pname ++ 
-                           "(" ++ pargs ++ ")" ++ pbody
-        where 
-            pname  = procId p
-            pargs' = map (\(a , b) -> a ++ " : " ++ show b ++ "; ") . procArgs $ p
-            pargs  = concat pargs'
-            pbody' = procBody p
-            pbody  = unlines . map ("  "++) . lines . show $ pbody'
+            funKind= case ftype' of 
+                        NoneT -> "[Procedure] "
+                        _     -> "[Function] "
+    
+    
 
 instance Show Statement where
     show b@Block{} = "BEGIN\n" ++ stmts ++ "END\n"
         where 
             stmts' = blockInsts b
             stmts  =  unlines . map ("  "++) . lines . concatMap show $ stmts'
-    show (Assign vid exp) = vid ++ " := " ++  show exp ++ "\n"
+    show (Assign vid exp _) = vid ++ " := " ++  show exp ++ "\n"
 
     show mif@If{}  = "IF (" ++ expr ++ ") " ++ "[ BID: " ++ bid ++ " ]\n" ++
                      sccbody ++ "ELSE: " ++ fbody   
