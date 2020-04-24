@@ -96,7 +96,7 @@ Statements   :: { [Statement] }
              | Statements  ';'                  {$1}
 
 Statement    :: { Statement }
-             : FuncCall                         { uncurry ProcCall $ $1 }
+             : FuncCall                         { ProcCall (getId . fst $ $1) (snd $1) (getPos . fst $ $1) }
              | Assign                           { $1 }
              | IfStatement                      { $1 }
              | CaseStmnt                        { $1 }             
@@ -109,18 +109,18 @@ Statement    :: { Statement }
 Assign       :: { Statement }
              : name ':=' Expr                   { Assign (getId $1) $3 (getPos $1) }
 
-FuncCall     :: {(String, [Exp])}
-             : name'('')'                      { (getId $1, []) }
-             | name'(' FuncArgs ')'            { (getId $1, $3) }
+FuncCall     :: {(Token, [Exp])}
+             : name'('')'                      { ($1, []) }
+             | name'(' FuncArgs ')'            { ($1, reverse $3) }
 
 FuncArgs     :: {[Exp]}
              : Expr                             { [$1] }
              | FuncArgs ',' Expr                { $3:$1 } 
 
 IfStatement  :: { Statement } 
-             : if Expr then Statement           { If $2 $4 Skip (-1) }
+             : if Expr then Statement           { If $2 $4 Skip (-1) (getPos $1)}
              | if Expr then Statement 
-                else Statement                  { If $2 $4 $6 (-1) }
+                else Statement                  { If $2 $4 $6 (-1) (getPos $1)}
 
 CaseStmnt    :: { Statement }
              : case Expr of Cases end           { Case $2 $4 Skip (-1)}
@@ -138,7 +138,7 @@ CaseLabels   :: { [Exp] }
              | CaseLabels ',' Literl            { $3:$1 }
 
 WhileDo      :: { Statement }
-             : while Expr do Statement          { While $2 $4 0}
+             : while Expr do Statement          { While $2 $4 (-1) (getPos $1)}
 
 ForDo        :: { Statement }
              : for name ':=' Expr to Expr 
@@ -178,17 +178,25 @@ DataType     :: {DataType}
 -- < Expressions > ---------------------------------------------------
 Expr         :: { Exp }                         
              : SimpleExpr                       { $1 }
-             | SimpleExpr RelOpr SimpleExpr     { BinaryOp $2 $1 $1 }
+             | SimpleExpr RelOpr SimpleExpr     { BinaryOp $2 $1 $3 }
 
 SimpleExpr   :: { Exp }
              : Term                             { $1 }
              | UnOper Term                      { NumExpr (Op1 $1 $2) }
-             | Term AddOpr Term                 { BinaryOp $2 $1 $3 }
+             | AddOprs                          { $1 }
+
+AddOprs      :: { Exp }
+             : Term AddOpr Term                 { BinaryOp $2 $1 $3 }
+             | AddOprs AddOpr Term              { BinaryOp $2 $1 $3 }
 
 Term         :: { Exp }
              : Factor                           { $1 }
-             | Factor MulOpr Factor             { BinaryOp $2 $1 $3 }
+             | MulOprs                          { $1 }
 
+MulOprs      :: { Exp }
+             : Factor MulOpr Factor             { BinaryOp $2 $1 $3 }
+             | MulOprs MulOpr Factor            { BinaryOp $2 $1 $3 }
+             
 Factor       :: { Exp }                                 
              :  num                             { NumExpr (NumConst $1) }
              |  name                            { IdExpr (getId $1) (getPos $1) }
@@ -196,7 +204,7 @@ Factor       :: { Exp }
              |  false                           { BoolExpr FalseC }
              | '(' Expr ')'                     { $2 }
              | not Factor                       { BoolExpr (Not $2) }
-             | FuncCall                         { uncurry FunExpr $ $1 }
+             | FuncCall                         { FunExpr ( getId . fst $ $1) (snd $1) (getPos . fst $ $1) }
 
 
 RelOpr       :: { String }
