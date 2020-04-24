@@ -23,7 +23,7 @@ import qualified Data.Set as S
 -- Data-structure for generic expressions
 data Exp = BoolExpr { boolExpr :: BoolExp } --Boolean expression
          | NumExpr  { numExpr :: NumExp }   --Numeric expresion
-         | FunExpr  { funExpId :: String, funExpArgs :: [Exp] } --Function call
+         | FunExpr  { funExpId :: String, funExpArgs :: [Exp], callPos :: (Int,Int) } --Function call
          | IdExpr   { idExpr :: String, refPos :: (Int,Int) } --Simple id
          | BinaryOp { opert :: String, oper1 :: Exp, oper2 :: Exp }
            deriving(Eq)
@@ -114,7 +114,8 @@ data Statement = Assign{                -- Variable assignment
                     ifCond :: Exp,        -- condition that must be true
                     succInst :: Statement,-- Instruction executed when cond=true
                     failInst :: Statement,-- Executed when cond = false 
-                    ibid     :: Int       -- if bid
+                    ibid     :: Int,      -- if bid
+                    ipos     :: (Int,Int)
                     }
                 -- Case statement
                 | Case{
@@ -136,14 +137,16 @@ data Statement = Assign{                -- Variable assignment
                     }
                 -- While loop
                 | While{
-                    whCond :: Exp,        --While condition 
-                    whBody :: Statement,--while instructions
-                    wbid   :: Int         --While block id 
+                    whCond :: Exp,          --While condition 
+                    whBody :: Statement,    --while instructions
+                    wbid   :: Int,          --While block id 
+                    wpos   :: (Int,Int)     --While calling pos. in the file
                     }
                 -- Function & procedure calls
                 | ProcCall{
                     procName :: String,
-                    procCallArgs :: [Exp]
+                    procCallArgs :: [Exp],
+                    pcallPos :: (Int, Int)
                     }
                 -- Block
                 | Block {   --Instruction block
@@ -267,10 +270,11 @@ instance Show Program where
 instance Show Exp where
     show BoolExpr{ boolExpr = b} = show b
     show NumExpr{numExpr = n} = show n
-    show FunExpr{funExpId=id, funExpArgs = args} = id ++ "(" ++ args' ++ ")"
+    show FunExpr{funExpId=id, funExpArgs = args} = 
+        id ++ "(" ++ args' ++ ")"
         where 
             args' = concatMap ((++ "; ") . show ) args
-    show IdExpr{idExpr = id} = id
+    show IdExpr{idExpr = id} = "[var]" ++ id
     show BinaryOp{opert = o, oper1 = op1, oper2 = op2} = "( " ++ o ++ " (" ++
                                 show op1 ++") ("++ show op2 ++ ") )"
 
@@ -295,7 +299,7 @@ instance Show BoolExp where
     show FalseC = "false"
     show BoolVar{boolVarId = id} = id
     show RelOp{relOp = o, relOprn1 = op1, relOprn2 = op2} = "( " ++ o ++ 
-                            " (" ++ show op1 ++ ") (" ++ show op2 ++ ")"
+                            " (" ++ show op1 ++ ") (" ++ show op2 ++ "))"
     show CompOp{compOp = o, compArg1 = op1, compArg2 = op2} = "( " ++ o ++ 
                             " (" ++ show op1 ++ ") (" ++ show op2 ++ ")"
 

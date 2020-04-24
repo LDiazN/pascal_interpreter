@@ -205,5 +205,10 @@ isRealVar Symbol{symType = RealVar{}} = True
 isRealVar _ = False
 
 isFunc :: Symbol -> Bool
+isFunc Symbol{symType = Function{ funcType = D.NoneT }} = False
 isFunc Symbol{symType = Function{}} = True
 isFunc _ = False
+
+isProc :: Symbol -> Bool
+isProc Symbol{symType = Function{ funcType = D.NoneT }} = True
+isProc _ = False
