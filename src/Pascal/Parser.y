@@ -181,13 +181,16 @@ Expr         :: { Exp }
              | SimpleExpr RelOpr SimpleExpr     { BinaryOp $2 $1 $3 }
 
 SimpleExpr   :: { Exp }
-             : Term                             { $1 }
-             | UnOper Term                      { NumExpr (Op1 $1 $2) }
+             : UnTerm                           { $1 }
              | AddOprs                          { $1 }
 
+UnTerm       :: { Exp }
+             : Term                             { $1 }
+             | UnOper UnTerm                    { NumExpr (Op1 $1 $2) }
+
 AddOprs      :: { Exp }
-             : Term AddOpr Term                 { BinaryOp $2 $1 $3 }
-             | AddOprs AddOpr Term              { BinaryOp $2 $1 $3 }
+             : UnTerm AddOpr UnTerm             { BinaryOp $2 $1 $3 }
+             | AddOprs AddOpr UnTerm            { BinaryOp $2 $1 $3 }
 
 Term         :: { Exp }
              : Factor                           { $1 }
@@ -230,10 +233,6 @@ MulOpr       :: { String }
              | '%'                              { "%" }   
              | and                              { "and" }
 
-Literl       :: { Exp }
-             : num                              { NumExpr (NumConst $1) }
-             | true                             { BoolExpr (TrueC) }
-             | false                            { BoolExpr (FalseC) }
 {
 
 }

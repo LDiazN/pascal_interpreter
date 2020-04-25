@@ -363,7 +363,7 @@ reduceConstantBool x = Just x
 -- found (dividing by 0, for example) return Nothing 
 reduceConstantNum :: NumExp -> Maybe NumExp
 reduceConstantNum op@Op1{unOp = o, unOprn = expr'} 
-    | o /= "+" || o /= "-" = error $ "Unvalid unary operator: " ++ o
+    | o /= "+" && o /= "-" = error $ "Unvalid unary operator: " ++ o
     | otherwise = newExp 
     where 
         expr = case expr' of 

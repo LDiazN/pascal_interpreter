@@ -18,83 +18,112 @@ import qualified Pascal.SymbolTable as ST
 import qualified Pascal.Data        as D
 ---------------------------------------------
 
-data States = Program 
-            | Function{currFun :: String, ok :: Bool}
-            | Loop 
-            deriving(Eq,Show)
-
+--All the possible static errors 
 data ErrClass = Ok
+                --Redefinition of built in function
               | BuiltFunRedef{ 
                     funRedef  :: String
                     }
+                --Function without return
+              | FunWOutReturn{
+                  fworet :: String 
+              }
+                --Redefinition of symbol in the same context
               | SymRedef{
                     redefSym :: String,
                     orginSymPos :: (Int,Int)
                     }
+                --Reference to symbol that does not exists
               | UndefinedRef{
                     undefSym :: String
                     }
+                --Unvalid function reference
               | UndeFunRef{
                     undefFun :: String
                     }
+                --Unvalid procedure reference
               | UndeProcRef{
                     undefProc :: String
                     }
+                --Unvalid variable reference
               | UndeVarRef{
                     undefVar :: String
                     }
+                --Unvalid args in function call
               | UnvalidArgs{
                     unvArgsFun :: String,
                     unvArgsMsg :: String
                     }
+                --Unmatching types in binary operation
               | UnmatchTypesOper{
                     unmop  :: String,     --operator
                     unmop1 :: D.DataType, --operand 1
                     unmop2 :: D.DataType  --operand 2
                     }
+                --Unmatiching types in unary operation
               | UnmatchTypesOper1{ --for unary operators
                     unmopUnry   :: String,     --operator
                     unmopUnryIn :: D.DataType --operand 
                     }
+                --Unmatiching types in variable assign
               | UnmatchTypesAssign{
                     unmtVarId  :: String,
                     unmVarType :: D.DataType,
                     unmExpType :: D.DataType
                     }
+                --condition in some conditional statement is not a 
+                --boolean expression
               | CondNotBool{
                     condPos :: (Int,Int)
               }
+                --Iterator in for statement is not a numeric variable
               | IteretNotNum
-
+                --Division by zero in numeric expression
               | DivideByZero 
-
+                -- Unmatching types between case labels and comparing
+                -- expression
               | UnmatchingCaseTypes
-
+                --Case label is not a constant expression
               | CaseNotConstLabel
-
-              | LoopCntrlOOC --loop control out of context
+                -- loop control out of context (continue or break
+                -- out of loop statement)
+              | LoopCntrlOOC 
                 deriving(Eq)
 
+--Needed to check if a continue/break statements are placed
+--inside a loop
+data States = Program 
+            | Loop 
+            deriving(Eq,Show)
+
+-- Main error type
 data ContextError = ContextError{
                         errPos :: (Int,Int), -- Error position
                         errType:: ErrClass  -- Aditional error info
                     }
                     deriving(Eq)
 
+-- Analyzer state
 data ContextState = ContextState{
                         --Symbol table to control definitions
                         symTable :: ST.SymbolTable, 
                         --Error stack
                         errors   :: [ContextError],
                         --analysis state stack
-                        analysisState :: [States]
+                        analysisState :: [States],
+                        --if the program being checked is a function.
+                        --This is a stack of function names, needed to remember
+                        --nested function declarations
+                        checkingFun :: [String],
+                        --If the function checked is ok
+                        funOk :: Bool
                     }
 
 type RetState a  = StateT ContextState IO a
 
 analyzeAST :: D.MainProgram -> IO (Either String D.MainProgram)
 analyzeAST mp = do 
-    (p, state) <- runStateT (analyzer mp) (ContextState ST.newTable [] [Program] )
+    (p, state) <- runStateT (analyzer mp) (ContextState ST.newTable [] [Program] [] False )
 
     let 
         errs = errors state
@@ -184,13 +213,11 @@ analyzer' p@D.Program{D.progInstrs = pi, D.progDecl = pd} = do
                                 _  -> ContextError decpos errFname : errs
                 newSt'   = ST.pushEmptyScope $ fromMaybe st (ST.insertSym newSym st)
                  
-                topState = case ftype of
-                            D.NoneT -> Program
-                            _       -> Function fname False
             --simulate
             put state{  errors = newErrs, 
                         symTable = newSt',
-                        analysisState = topState:analysisState state
+                        checkingFun = fname:checkingFun state,
+                        funOk = False
                         }
             -- add the args variables to the current context
             mapM_ checkDecl args
@@ -203,8 +230,16 @@ analyzer' p@D.Program{D.progInstrs = pi, D.progDecl = pd} = do
             resultState <- get
             put resultState{
                     analysisState = tail . analysisState $ resultState,
-                    symTable = ST.popScope . symTable $ resultState
+                    symTable = ST.popScope . symTable $ resultState,
+                    checkingFun = tail . checkingFun $ resultState,
+                    funOk = False
                 }
+            unless (funOk resultState || ftype == D.NoneT) $ do
+                errState <- get
+                put errState{
+                    errors = ContextError decpos (FunWOutReturn fname) :
+                             errors errState }
+
             return f{D.funcBody = newBody}
 
 
@@ -218,13 +253,14 @@ analyzer' p@D.Program{D.progInstrs = pi, D.progDecl = pd} = do
             return b{D.blockInsts = newInst}
         --Check assign
         checkStmnt a@D.Assign{D.assVarId = s, D.assVal = expr, D.assPos = p} = do
-            state@ContextState{errors = errs, symTable = st} <- get
+            state@ContextState{errors = errs, symTable = st, checkingFun = cf} <- get
             let 
                 --Expression checking
-                expErrs = checkExpr expr st 
-                cleaned = case reduceExpr expr st of
-                                Left be  -> D.BoolExpr be
-                                Right ne -> D.NumExpr ne
+                expErrs = case cleaned' of
+                            Left errs -> errs
+                            _         -> []
+                cleaned'= cleanExpr expr st
+                cleaned = fromRight expr cleaned'
                 expType = getType cleaned st
                 --Symbol checking
                 sym     = ST.findSym s st
@@ -235,9 +271,8 @@ analyzer' p@D.Program{D.progInstrs = pi, D.progDecl = pd} = do
                     | otherwise = error "failed to check assign"
 
                 -- Creating cleaned expression
-                newExp 
-                    | null newErrs = cleaned   
-                    | otherwise = expr
+                newExp = cleaned
+
                 -- Error checking
                 newErrs 
                     | isNothing sym = 
@@ -252,7 +287,14 @@ analyzer' p@D.Program{D.progInstrs = pi, D.progDecl = pd} = do
                             [UnmatchTypesAssign s stype expType]
                     | otherwise = [] 
                 newErrs' = [ContextError p s | s <- newErrs] ++ errs
-            put state{errors = newErrs'}
+                --Function return checking
+                newFunOk 
+                    | null cf = False
+                    | otherwise = funOk state || head cf == s
+            put state{
+                        errors = newErrs',
+                        funOk = newFunOk
+                    }
             
             return a{D.assVal = newExp}
 
@@ -265,10 +307,9 @@ analyzer' p@D.Program{D.progInstrs = pi, D.progDecl = pd} = do
             let 
                 newBid  = ST.scopeCnt st
                 newSt   = ST.pushEmptyScope st
-                cleaned = case reduceExpr expr st of
-                            Left  be -> D.BoolExpr be
-                            Right ne -> D.NumExpr ne 
-                expErrs = checkExpr expr st
+                cleaned'= cleanExpr expr st 
+                cleaned = fromRight expr cleaned' 
+                expErrs = fromLeft [] cleaned'
                 newErrs 
                     | not (null expErrs) = 
                         [ ContextError p s | s <- expErrs]
@@ -283,9 +324,7 @@ analyzer' p@D.Program{D.progInstrs = pi, D.progDecl = pd} = do
             put lastState{symTable = ST.popScope . symTable $ lastState}
             
             return ifstm{
-                         D.ifCond   = if null expErrs 
-                                        then cleaned
-                                        else expr,  
+                         D.ifCond   = cleaned,  
                          D.succInst = newSuccInst,
                          D.failInst = newFailInst,
                          D.ibid     = newBid
@@ -298,7 +337,7 @@ analyzer' p@D.Program{D.progInstrs = pi, D.progDecl = pd} = do
                                 analysisState=states} <- get
             let 
                 newStates = Loop:states
-                expErrs = checkExpr expr st
+                expErrs = fromLeft [] newCond'
                 cleaned = case reduceExpr expr st of
                             Left be  -> D.BoolExpr be
                             Right ne -> D.NumExpr ne
@@ -310,9 +349,9 @@ analyzer' p@D.Program{D.progInstrs = pi, D.progDecl = pd} = do
                     | otherwise = []
                 newBid  = ST.scopeCnt st
                 newSt   = ST.pushEmptyScope st
-                newCond 
-                    | null expErrs = cleaned
-                    | otherwise    = expr 
+                newCond'= cleanExpr expr st
+                newCond = fromRight expr newCond'
+                    
 
             -- Put the state with a new scope pushed, errors updates
             -- and the loop state at the top of the states stack
@@ -351,19 +390,16 @@ analyzer' p@D.Program{D.progInstrs = pi, D.progDecl = pd} = do
                 initExp  = D.forInitVal f
                 endExp   = D.forEndVal f
                 forBody  = D.forBody f
-                initType = getType cleanedInit st
-                endType  = getType cleanedEnd st
+                initType = getType newInit st
+                endType  = getType newEnd st
                 p        = D.fpos f
                 -- New For Data:
                 newBid = ST.scopeCnt st
-                cleanedInit = reduceExpr' initExp st
-                cleanedEnd  = reduceExpr' endExp st
-                newInit
-                    | null expErrors1 = cleanedInit
-                    | otherwise = initExp
-                newEnd
-                    | null expErrors2 = cleanedEnd
-                    | otherwise = endExp
+                cleanedInit'= cleanExpr initExp st
+                cleanedEnd' = cleanExpr endExp st
+                newInit = fromRight initExp cleanedInit'
+                newEnd  = fromRight endExp cleanedEnd'
+
                 newFor = f{
                     D.forInitVal = newInit,
                     D.forEndVal  = newEnd,
@@ -371,8 +407,8 @@ analyzer' p@D.Program{D.progInstrs = pi, D.progDecl = pd} = do
                 }
 
                 --Error checking:
-                expErrors1 = checkExpr initExp st
-                expErrors2 = checkExpr endExp st
+                expErrors1 = fromLeft [] cleanedInit'
+                expErrors2 = fromLeft [] cleanedEnd'
                 itSym      = ST.findSym iter st
                 itSym'     = fromJust itSym
                 newErrs 
@@ -853,6 +889,9 @@ instance Show ErrClass where
         "Redefinition of symbol '" ++ s ++ "' defined in line: " ++
         show ox ++ ", column: " ++ show oy   
 
+    show (FunWOutReturn s) =
+        "Function '" ++ s ++ "' does not have a return statement"
+
     show (UndefinedRef s) = 
         "Undefined symbol reference: '" ++ s ++ "'"
 
@@ -897,6 +936,7 @@ instance Show ErrClass where
         "Case statement labels must be constant expressions"
     show LoopCntrlOOC = 
         "'continue' or 'break' statement found out of loop"
+    
 -- Needed to use IO within State monad context
 io :: IO a -> StateT ContextState IO a
 io = liftIO  
