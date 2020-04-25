@@ -103,8 +103,8 @@ Statement    :: { Statement }
              | WhileDo                          { $1 }
              | ForDo                            { $1 }
              | Block                            { $1 }
-             | break                            { Break }
-             | continue                         { Continue }
+             | break                            { Break (getPos $1)}
+             | continue                         { Continue (getPos $1)}
 
 Assign       :: { Statement }
              : name ':=' Expr                   { Assign (getId $1) $3 (getPos $1) }
@@ -123,7 +123,7 @@ IfStatement  :: { Statement }
                 else Statement                  { If $2 $4 $6 (-1) (getPos $1)}
 
 CaseStmnt    :: { Statement }
-             : case Expr of Cases end           { Case $2 $4 Skip (-1)}
+             : case Expr of Cases end           { Case $2 $4 Skip (-1) (getPos $1)}
              
 
 Cases        :: { [(Exp, Statement)] }
@@ -134,17 +134,17 @@ Case         :: {[(Exp, Statement)]}
              : CaseLabels ':' Statement           { [(e, $3) | e <- $1] }
 
 CaseLabels   :: { [Exp] }
-             : Literl                           { [$1] }
-             | CaseLabels ',' Literl            { $3:$1 }
+             : Expr                           { [$1] }
+             | CaseLabels ',' Expr            { $3:$1 }
 
 WhileDo      :: { Statement }
              : while Expr do Statement          { While $2 $4 (-1) (getPos $1)}
 
 ForDo        :: { Statement }
              : for name ':=' Expr to Expr 
-                             do Statement       { For (getId $2) $4 $6 $8 "to" (-1) }
+                             do Statement       { For (getId $2) $4 $6 $8 "to" (-1) (getPos $1)}
              | for name ':=' Expr downto Expr 
-                             do Statement       { For (getId $2) $4 $6 $8 "downto" (-1) }
+                             do Statement       { For (getId $2) $4 $6 $8 "downto" (-1) (getPos $1)}
 
 -- < Declaration Statements > ----------------------------------------
 Declarations :: {[Declaration]}

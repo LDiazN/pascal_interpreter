@@ -12,11 +12,15 @@ module Pascal.Data
         DataType(..),
         MainProgram,
         printMainProg,
-        builtInFuns
+        builtInFuns,
+        reduceConstant,
+        isConstant
     ) where
 
 ---------------------------------------------------------------------------------
 import qualified Data.Set as S
+import Data.Maybe
+import Data.Fixed
 ---------------------------------------------------------------------------------
 
 
@@ -124,7 +128,8 @@ data Statement = Assign{                -- Variable assignment
                     -- evaluated:
                     caseGuards :: [(Exp, Statement)],
                     caseElse   :: Statement, --Default case
-                    cbid       :: Int
+                    cbid       :: Int,
+                    cpos       :: (Int,Int)  --Case position
                     }
                 -- For loop
                 | For{
@@ -133,7 +138,8 @@ data Statement = Assign{                -- Variable assignment
                     forEndVal   :: Exp,        --Iterator final value
                     forBody     :: Statement,  --For instructions
                     forIncr     :: String,     --Increase iterator 
-                    fbid        :: Int         --For block id
+                    fbid        :: Int,        --For block id
+                    fpos        :: (Int,Int)   -- Position in the file
                     }
                 -- While loop
                 | While{
@@ -152,8 +158,12 @@ data Statement = Assign{                -- Variable assignment
                 | Block {   --Instruction block
                     blockInsts :: [Statement]
                     } 
-                | Break
-                | Continue
+                | Break{
+                    bpos :: (Int,Int) --break position
+                    } 
+                | Continue{
+                    contPos :: (Int,Int) --contienue position
+                    }
                 | Skip
                 deriving (Eq)
 
@@ -185,7 +195,241 @@ builtInFuns = S.fromList [
                         ]
 
 ------------------------------------------------------------
--- < Helper functions to print program > --------------------
+-- < Utility functions for the AST > -----------------------
+
+-- Aux function: Checks if an Exp is a constant, bool or real
+isConstant :: Exp -> Bool
+isConstant e = isNumConstant' e  || isBoolConstant' e
+
+-- Aux function: checks if a NumExp is a constant
+isNumConstant :: NumExp -> Bool
+isNumConstant NumConst{} = True
+isNumConstant _ = False
+
+--Like isNumConstant, but with NumExpr wrapped in a generic exp
+isNumConstant' :: Exp -> Bool
+isNumConstant' (NumExpr expr) = isNumConstant expr
+isNumConstant' _ = False
+
+-- Aux function: checks if a BoolExp is a constant
+isBoolConstant :: BoolExp -> Bool
+isBoolConstant TrueC  = True
+isBoolConstant FalseC = True
+isBoolConstant _ = False
+
+--Like isBoolConstant, but with NumExpr wrapped in a generic exp
+isBoolConstant' :: Exp -> Bool
+isBoolConstant' (BoolExpr expr) = isBoolConstant expr
+isBoolConstant' _ = False
+
+
+--Return a bool from a bool constant
+etoBool :: BoolExp -> Bool
+etoBool TrueC = True
+etoBool FalseC = False
+etoBool _ = error "This is not a bool constant"
+
+--Return an exp from a bool val
+btoExp :: Bool -> BoolExp
+btoExp True = TrueC
+btoExp False = FalseC
+
+-- Aux function: returns a reduced expression
+reduceConstant :: Exp -> Maybe Exp
+reduceConstant (NumExpr ne) = (Just . NumExpr) =<< reduceConstantNum ne 
+
+reduceConstant (BoolExpr be) = (Just . BoolExpr) =<< reduceConstantBool be 
+
+reduceConstant _ = error "Incorrect use of reduceConstant"
+
+-- Aux function: Given a boolean expressionm reduce as much
+-- as possible.  If some error is found, return Nothing
+reduceConstantBool :: BoolExp -> Maybe BoolExp
+reduceConstantBool ne@(Not (BoolExpr expr)) = 
+    
+    let 
+
+        redExp = reduceConstantBool expr
+
+        newExp 
+            | isNothing redExp = Nothing
+            | otherwise = case expr of 
+                            TrueC  -> Just FalseC
+                            FalseC -> Just TrueC
+                            _      -> Just . fromJust $ redExp
+
+    in newExp
+    
+reduceConstantBool Not{} = error "Not a valid Bool Exp in reduceConstantBool"
+
+reduceConstantBool be@(OpB o op1 op2) = 
+    let
+        newOp1 = case op1 of
+                    BoolExpr be -> be
+                    _           -> error "Error in reduceConstantBool, this not a bool expr"
+        newOp2 = case op2 of
+                    BoolExpr be -> be
+                    _           -> error "Error in reduceConstantBool, this not a bool expr"
+        
+        newOp1' = reduceConstantBool newOp1
+        newOp2' = reduceConstantBool newOp2
+
+        newOp1'' = fromJust newOp1'
+        newOp2'' = fromJust newOp2'
+
+        op = case o of 
+                "or"  -> (||)
+                "and" -> (&&)
+                _ -> error "Error in reduceConstantBool: not a valid operator"
+
+        newExp 
+            | isNothing newOp1' || isNothing newOp2' = Nothing
+            | isBoolConstant newOp1'' && isBoolConstant newOp2'' =
+                Just . btoExp $ op  (etoBool newOp1'' ) (etoBool newOp2'')
+            | otherwise = Just be{boolOprn1 = BoolExpr newOp1'', boolOprn2 = BoolExpr newOp2''}
+    in newExp
+
+reduceConstantBool be@(CompOp o (NumExpr ne1) (NumExpr ne2)) =
+    let 
+        op = case o of 
+                "="  -> (==)
+                "<>" -> (/=)
+
+        newOp1 = reduceConstantNum ne1
+        newOp2 = reduceConstantNum ne2
+
+        newOp1' = fromJust newOp1
+        newOp2' = fromJust newOp2
+
+        newExp
+            | isNothing newOp1 || isNothing newOp2 = Nothing
+            | isNumConstant newOp1' && isNumConstant newOp2' = 
+                Just . btoExp $ op (numVal newOp1')  (numVal newOp2')
+            | otherwise = Just be{compArg1 = NumExpr newOp1', compArg2 = NumExpr newOp2'}
+    in newExp
+
+reduceConstantBool be@(CompOp o (BoolExpr be1) (BoolExpr be2)) =
+    let 
+        op = case o of 
+                "="  -> (==)
+                "<>" -> (/=)
+
+        newOp1 = reduceConstantBool be1
+        newOp2 = reduceConstantBool be2
+
+        newOp1' = fromJust newOp1
+        newOp2' = fromJust newOp2
+
+        newExp
+            | isNothing newOp1 || isNothing newOp2 = Nothing
+            | isBoolConstant newOp1' && isBoolConstant newOp2' = 
+                Just . btoExp $ op (etoBool newOp1')  (etoBool newOp2')
+            | otherwise = Just be{compArg1 = BoolExpr newOp1', compArg2 =BoolExpr newOp2'}
+    in newExp
+
+reduceConstantBool CompOp{} = error 
+    "error in reduceConstantBool: Unvalid comparision between different types"
+
+reduceConstantBool be@(RelOp o (NumExpr ne1) (NumExpr ne2)) = 
+    let 
+        op = case o of 
+                ">"  -> (>)
+                "<"  -> (<)
+                ">=" -> (>=)
+                "<=" -> (<=)
+
+
+        newOp1 = reduceConstantNum ne1
+        newOp2 = reduceConstantNum ne2
+
+        newOp1' = fromJust newOp1
+        newOp2' = fromJust newOp2
+
+        newExp
+            | isNothing newOp1 || isNothing newOp2 = Nothing
+            | isNumConstant newOp1' && isNumConstant newOp2' = 
+                Just . btoExp $ op (numVal newOp1')  (numVal newOp2')
+            | otherwise = Just be{compArg1 = NumExpr newOp1', compArg2 = NumExpr newOp2'}
+    in newExp
+
+reduceConstantBool RelOp{} = error
+    "error in reduceConstantBool: unvalid relational expression between non-Real expressions"
+
+--Else
+reduceConstantBool x = Just x
+
+-- Aux function: given a numeric expression, reduce as much as
+-- possible all the constant sub expressions. If some error is 
+-- found (dividing by 0, for example) return Nothing 
+reduceConstantNum :: NumExp -> Maybe NumExp
+reduceConstantNum op@Op1{unOp = o, unOprn = expr'} 
+    | o /= "+" || o /= "-" = error $ "Unvalid unary operator: " ++ o
+    | otherwise = newExp 
+    where 
+        expr = case expr' of 
+                NumExpr a -> a
+                _         -> error "error in reduceConstantNum, not a num exp"
+        redExp   = reduceConstantNum expr
+        redExp'  = fromJust redExp
+        constant = numVal redExp'
+        oper 
+            | o == "+" = (0+)
+            | o == "-" = (0-)
+        newExp 
+            | isNothing redExp = Nothing
+            | isNumConstant redExp' = Just . NumConst . oper $ constant
+            | otherwise = Just op{unOprn = NumExpr redExp'}
+
+
+reduceConstantNum op@Op2{binOp = o,binOprn1 = opr1' , binOprn2 = opr2'} =
+    let 
+        --General data
+        opr1     = case opr1' of
+                    NumExpr a -> a
+                    _         -> error "Error in reduceConstantNum, not a num exp"
+        opr2     = case opr2' of
+                    NumExpr a -> a
+                    _         -> error "Error in reduceConstantNum, not a num exp"                            
+        newOp1   = reduceConstantNum opr1 
+        newOp2   = reduceConstantNum opr2
+        newOp1'  = fromJust newOp1
+        newOp2'  = fromJust newOp2
+        oper2Val = numVal newOp2' 
+        oper1Val = numVal newOp1'
+
+        --In case of addition or multiplication:
+        oper  =  case o of 
+                "%" -> mod'
+                "*" -> (*)
+                "+" -> (+)
+                "/" -> (/)
+                "-" -> (-)
+                _   -> error "Logic error in reduceConstantNum"
+        
+        --In case of division:          
+        newExp   
+            | isNumConstant newOp2' && oper2Val == 0 = Nothing
+            | isNumConstant newOp2' && isNumConstant newOp1' =
+                Just . NumConst $ oper oper1Val oper2Val
+            | otherwise = Just op{binOprn1 = NumExpr newOp1', binOprn2 = NumExpr newOp2'}
+
+        --Any other operation: 
+        newExp' 
+            | isNothing newOp1 || isNothing newOp2 = Nothing
+            | o == "/" || o=="%" = newExp
+            | isNumConstant newOp1' && isNumConstant newOp2' =
+                Just . NumConst $ oper oper1Val oper2Val
+            | otherwise = Just op{binOprn1 = NumExpr newOp1', binOprn2 = NumExpr newOp2'}
+
+    in newExp'
+
+
+
+reduceConstantNum ne = Just ne
+
+
+------------------------------------------------------------
+-- < Helper functions to print program > -------------------
 
 instance Show Declaration where
     show (Variable s d _) = "[Var] " ++ s ++ " : " ++ show d
@@ -259,8 +503,8 @@ instance Show Statement where
             cases' = caseGuards c
             cases  = unlines . map (("  "++) . (\(a,b) -> show a ++ " : " ++ show b)) $ cases'
     
-    show Break = "BREAK\n"
-    show Continue = "CONTINUE\n"
+    show Break{} = "BREAK\n"
+    show Continue{} = "CONTINUE\n"
 
 instance Show Program where
     show (Program pins pdec) = strdec ++ "\n" ++ show pins

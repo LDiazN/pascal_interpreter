@@ -8,6 +8,7 @@ module Pascal.Analyzer where
 import Control.Monad
 import Control.Monad.State
 import Data.Maybe
+import Data.Either
 ---------------------------------------------
 import qualified Data.List          as L
 import qualified Data.Map           as M
@@ -63,6 +64,15 @@ data ErrClass = Ok
               | CondNotBool{
                     condPos :: (Int,Int)
               }
+              | IteretNotNum
+
+              | DivideByZero 
+
+              | UnmatchingCaseTypes
+
+              | CaseNotConstLabel
+
+              | LoopCntrlOOC --loop control out of context
                 deriving(Eq)
 
 data ContextError = ContextError{
@@ -330,6 +340,171 @@ analyzer' p@D.Program{D.progInstrs = pi, D.progDecl = pd} = do
                     D.whBody = newBody 
                     }
 
+        --Check a for loop
+        checkStmnt f@D.For{} = do
+            state@ContextState{ symTable = st,
+                                errors = errs,
+                                analysisState = states} <- get
+            let 
+                --For data:
+                iter     = D.forIter f
+                initExp  = D.forInitVal f
+                endExp   = D.forEndVal f
+                forBody  = D.forBody f
+                initType = getType cleanedInit st
+                endType  = getType cleanedEnd st
+                p        = D.fpos f
+                -- New For Data:
+                newBid = ST.scopeCnt st
+                cleanedInit = reduceExpr' initExp st
+                cleanedEnd  = reduceExpr' endExp st
+                newInit
+                    | null expErrors1 = cleanedInit
+                    | otherwise = initExp
+                newEnd
+                    | null expErrors2 = cleanedEnd
+                    | otherwise = endExp
+                newFor = f{
+                    D.forInitVal = newInit,
+                    D.forEndVal  = newEnd,
+                    D.fbid = newBid
+                }
+
+                --Error checking:
+                expErrors1 = checkExpr initExp st
+                expErrors2 = checkExpr endExp st
+                itSym      = ST.findSym iter st
+                itSym'     = fromJust itSym
+                newErrs 
+                    | not (null expErrors1) || not (null expErrors2) = 
+                        [ContextError p s | s <- expErrors1 ++ expErrors2]
+                    | initType /= D.RealT || endType /= D.RealT = 
+                        [ContextError p IteretNotNum]
+                    | otherwise = []
+                newErrs' 
+                    | isNothing itSym = ContextError p (UndefinedRef iter) : newErrs
+                    | otherwise = newErrs
+                --new State Data:
+                newStates = Loop:states
+                newSt = ST.pushEmptyScope st 
+                
+            
+            --Put the new state
+            put state{
+                    symTable = newSt,
+                    analysisState = newStates,
+                    errors = newErrs' ++ errs
+                }
+            newBody <- checkStmnt forBody
+            --Get resulting state
+            finalState <- get
+
+            --pop loop state and current scope
+            put finalState{
+                symTable = ST.popScope . symTable $ finalState,
+                analysisState = tail . analysisState $ finalState
+            }
+            return newFor{D.forBody = newBody}
+
+        --Check case
+        checkStmnt cs@D.Case{} = do
+            state@ContextState{ symTable = st, 
+                                errors = errs } <- get
+            let 
+                -- 'Case' current data
+                compExp  = D.caseExp cs
+                csGuards = D.caseGuards cs
+                csElse   = D.caseElse cs
+                p = D.cpos cs
+
+                guardLabels = map fst csGuards
+                guardStmnts = map snd csGuards
+
+                -- new Case data
+                newBid      = ST.scopeCnt st
+                newCaseExp' = cleanExpr compExp st
+                newCaseExp  = fromRight compExp newCaseExp'
+
+                expType     = getType newCaseExp st
+                
+                newLabels'  = map (`cleanExpr` st) guardLabels 
+                newLabels   = rights newLabels'
+                    
+                -- Error check
+                    -- errors in label expressions
+                labErrs = concat . lefts $ newLabels'
+                    -- errors in condition expression
+                condErrs = concat . lefts $ [newCaseExp']
+                    --If the guards and the expressions are ok, then check the types.
+                    --If types are ok, then check if they are constant expressions
+                newErrs 
+                    | not (null labErrs) || not (null condErrs) = 
+                        [ContextError p s | s <- labErrs ++ condErrs]
+                    | any ((/=expType) . flip getType st) newLabels = 
+                        [ContextError p UnmatchingCaseTypes ]
+                    | not . all D.isConstant $ newLabels =
+                        [ContextError p CaseNotConstLabel]
+                    | otherwise = []
+
+                
+            --now we have to push an empty scope and check all the statements in the 
+            --right side of the case labels
+            put state{
+                symTable = ST.pushEmptyScope st,
+                errors = newErrs ++ errs
+                }
+
+            io $ print guardStmnts
+            newStmnts <- mapM checkStmnt guardStmnts
+            newElse   <- checkStmnt csElse
+            -- Get the new state and pop the context
+            finalState <- get
+            put finalState{
+                    symTable = ST.popScope . symTable $ finalState
+                }
+
+            -- Return the resulting case statement
+            return cs{
+                D.caseExp    = newCaseExp,
+                D.caseGuards = zip newLabels newStmnts,
+                D.cbid       = newBid,
+                D.caseElse     = newElse    
+                    }
+
+        checkStmnt fc@D.ProcCall{D.procName = s, D.procCallArgs = args, D.pcallPos = p} = do
+            state@ContextState{symTable = st, errors = errs} <- get
+            let 
+                sym' = ST.findSym s st
+                newArgs 
+                    | null newErrs = rights . map (`cleanExpr` st) $ args
+                    | otherwise = args
+                --Check errors:
+                funErrs = checkFun (fromJust sym') args st
+                newErrs
+                    | isNothing sym' = 
+                        [ContextError p (UndefinedRef s)]
+                    | not (null funErrs) = 
+                        [ContextError p s | s <- funErrs ]
+                    | otherwise = []
+
+            unless (null newErrs) $ put state{errors = newErrs ++ errs}
+
+            return fc{D.procCallArgs = newArgs}
+
+
+        checkStmnt c@D.Continue{D.contPos = p} = do
+            state@ContextState{errors = errs, analysisState = anSt} <- get
+            put state{
+                errors = [ContextError p LoopCntrlOOC | head anSt /= Loop] ++ errs
+            }
+            return c
+
+        checkStmnt b@D.Break{D.bpos = p} = do
+            state@ContextState{errors = errs, analysisState = anSt} <- get
+            put state{
+                errors = [ContextError p LoopCntrlOOC | head anSt /= Loop] ++ errs
+            }
+            return b
 
         checkStmnt x = return x
 
@@ -340,7 +515,25 @@ analyzer' p@D.Program{D.progInstrs = pi, D.progDecl = pd} = do
 -------------------------------------------------------------------------------
 -- < Aux functions >-----------------------------------------------------------
 
+-- Return either a cleaned expression or a list of errors
+cleanExpr :: D.Exp -> ST.SymbolTable -> Either [ErrClass] D.Exp
+cleanExpr expr st = 
+    let 
+        errs    = checkExpr expr st
+        cleaned = reduceExpr' expr st
+        
+        creduced = D.reduceConstant cleaned
+        errs'
+            | not (null errs) = errs
+            | isNothing creduced = [DivideByZero]
+            | otherwise = []
+        ret 
+            | null errs' = Right . fromJust $ creduced
+            | otherwise  = Left errs'
 
+    in ret
+
+--Check an expression to find possible errors
 checkExpr :: D.Exp -> ST.SymbolTable -> [ErrClass]
 --check var reference
 checkExpr D.IdExpr{D.idExpr = s} st = 
@@ -564,14 +757,15 @@ reduceExpr D.FunExpr{D.funExpId = s, D.funExpArgs = args} st =
     let 
         sym  = ST.findSym s st
         sym' = fromJust sym
-        ftype= ST.funcType . ST.symType $ sym'
+        ftype = ST.funcType . ST.symType $ sym'
+        newArgs = rights . map (`cleanExpr` st) $ args
         newExp 
             | isNothing sym = error $ 
                 "Error in reduceExpr, this is not a vallid ID: " ++ s
             | not (ST.isFunc sym') = error $
                 "Error in reduceExpr, this is not a valid function: " ++ s
-            | ftype == D.RealT = Right (D.NumFunCall s args)
-            | ftype == D.BooleanT = Left (D.BoolFunCall s args)
+            | ftype == D.RealT = Right (D.NumFunCall s newArgs)
+            | ftype == D.BooleanT = Left (D.BoolFunCall s newArgs)
     in newExp
 
 reduceExpr (D.BoolExpr (D.Not e1)) st = 
@@ -596,6 +790,12 @@ reduceExpr (D.NumExpr unop@(D.Op1 o e1)) st =
 
 reduceExpr (D.NumExpr expr) _ = Right expr
         
+
+--Aux function to reduceExpr: unwrapps the result in a Exp type
+reduceExpr' :: D.Exp -> ST.SymbolTable -> D.Exp
+reduceExpr' expr st = case reduceExpr expr st of
+                        Left be  -> D.BoolExpr be
+                        Right ne -> D.NumExpr ne
 
 
 
@@ -683,6 +883,20 @@ instance Show ErrClass where
 
     show (CondNotBool p) =
         "Expression in conditional statement must be a boolean expression"
+
+    show IteretNotNum =
+        "Expressions in 'for' iterator must be a numeric expression"
+
+    show DivideByZero = 
+        "Error dividing by zero in numeric expression"
+
+    show UnmatchingCaseTypes = 
+        "Case statement labels must be of the same type of the expression"
+
+    show CaseNotConstLabel =
+        "Case statement labels must be constant expressions"
+    show LoopCntrlOOC = 
+        "'continue' or 'break' statement found out of loop"
 -- Needed to use IO within State monad context
 io :: IO a -> StateT ContextState IO a
 io = liftIO  
