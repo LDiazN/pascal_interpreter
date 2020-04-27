@@ -90,18 +90,18 @@ data ErrClass = Ok
               | LoopCntrlOOC 
                 deriving(Eq)
 
---Needed to check if a continue/break statements are placed
---inside a loop
-data States = Program 
-            | Loop 
-            deriving(Eq,Show)
-
 -- Main error type
 data ContextError = ContextError{
                         errPos :: (Int,Int), -- Error position
                         errType:: ErrClass  -- Aditional error info
                     }
                     deriving(Eq)
+                    
+--Needed to check if a continue/break statements are placed
+--inside a loop
+data States = Program 
+            | Loop 
+            deriving(Eq,Show)
 
 -- Analyzer state
 data ContextState = ContextState{
@@ -127,7 +127,6 @@ analyzeAST mp = do
 
     let 
         errs = errors state
-
 
     if null errs
         then return (Right p)

@@ -12,10 +12,10 @@ import Data.Maybe
 -- This Data contains aditional info depending
 -- on the symbol type.
 data SymType =  Program 
-             |  Function{ -- Functions with Non return type are procedures
+             |  Function{         -- Functions with Non return type are procedures
                     fbid  :: Int, -- bid (Scope) for this function
-                    funcArgs :: [(String,D.DataType)],--function args
-                    funcType :: D.DataType,    -- function return type    
+                    funcArgs :: [(String,D.DataType)],  --function args
+                    funcType :: D.DataType,             -- function return type    
                     funcBody :: D.Program   
                 }
              |  BoolVar{
@@ -149,46 +149,56 @@ replace (x:xs) f y
     | otherwise = x : replace xs f y
 
 -- change the value of this variable 
-setRealVal :: String -> Float -> SymbolTable -> SymbolTable
-setRealVal s x st = 
+setVal :: String -> SymType -> SymbolTable -> SymbolTable
+setVal s x st = 
     let 
         smap = symMap st
         checkSym = findSym s st
         sym = fromJust checkSym
-        newSym = setRealVal' sym x 
+        newSym = sym{symType = x}
         slist = fromMaybe [] (M.lookup s smap)
         newList = replace slist (==sym) newSym
-        --Aux function: return the same symbol with its value
-        -- updated
-        setRealVal' :: Symbol -> Float -> Symbol
-        setRealVal' sym@Symbol{symType=rv@RealVar{}} v = 
-                    sym{ symType = rv{rval = v} }
 
         newSt = case checkSym of 
                     Nothing   -> st
                     Just _    -> st{ symMap = M.insert s newList smap }
     in newSt
 
--- change the value of this variable 
-setBoolVal :: String -> Bool -> SymbolTable -> SymbolTable
-setBoolVal s x st = 
+-- Creates the symbol from a declaration, assuming that the declaration is correct
+createSym :: D.Declaration -> Symbol
+createSym D.Variable{ D.varId = s, D.varType = t, D.vDeclpos = p} = 
     let 
-        smap = symMap st
-        checkSym = findSym s st
-        sym = fromJust checkSym
-        newSym = setBoolVal' sym x 
-        slist = fromMaybe [] (M.lookup s smap)
-        newList = replace slist (==sym) newSym
-        --Aux function: return the same symbol with its value
-        -- updated
-        setBoolVal' :: Symbol -> Bool -> Symbol
-        setBoolVal' sym@Symbol{symType=rv@BoolVar{}} v = 
-                    sym{ symType = rv{bval = v} }
+        newType = case t of 
+                    D.BooleanT -> BoolVar{bval = False}
+                    D.RealT    -> RealVar{rval = 0}
+                    _          -> error "error in createSym: this is not a valid variable"
+    in 
+        Symbol{
+            symId = s,
+            symScope = 0, --The symbol table can set this value to any value
+            symPos = p,
+            symType = newType
+        }
 
-        newSt = case checkSym of 
-                    Nothing   -> st
-                    Just _    -> st{ symMap = M.insert s newList smap }
-    in newSt
+createSym D.Function{   D.funcId = s, 
+                        D.funcArgs = args,
+                        D.funcType = t, 
+                        D.funcBody = fbody,
+                        D.fDeclPos = p} = 
+    let 
+        newType = Function{
+                    fbid = 0,      
+                    funcArgs = args,
+                    funcType = t,
+                    funcBody = fbody
+                }
+    in 
+        Symbol{
+            symId = s,
+            symScope = 0, --The symbol table can set this value to any value
+            symPos = p,
+            symType = newType
+        }        
 
 -- Check if the given id corresponds to a symbol with a specific condition.
 -- This is useful to check the type of the symbol. If the symbol does not 

@@ -14,7 +14,11 @@ module Pascal.Data
         printMainProg,
         builtInFuns,
         reduceConstant,
-        isConstant
+        isConstant,
+        strToBoolOp,
+        strToCompOp,
+        strToRelOp,
+        strToUnOp
     ) where
 
 ---------------------------------------------------------------------------------
@@ -58,8 +62,8 @@ data NumExp = Op1{                --Unary numeric operation
 data BoolExp = 
               OpB{                   --Binary Boolean operation
                 boolOp :: String,    --Binary Operator
-                boolOprn1 :: Exp,--left argument 
-                boolOprn2 :: Exp --right argument
+                boolOprn1 :: Exp,    --left argument 
+                boolOprn2 :: Exp     --right argument
                 }
             | Not{
                 notExpr :: Exp --Negated expresion
@@ -170,9 +174,9 @@ data Statement = Assign{                -- Variable assignment
 -- Data-structure for whole program
 -- Hint: make a tuple containing the other ingredients
 data Program = Program{
-                progInstrs ::Statement,     --Set of statements to execute. 
                                             --It must be a Block Statement
-                progDecl :: [Declaration]   -- Variables declared for this 
+                progInstrs :: Statement,    --Set of statements to execute. 
+                progDecl   :: [Declaration] -- Variables declared for this 
                                             -- program. Note that since
                                             -- Pascal doesn't allow declaring
                                             -- variables in the program body,
@@ -196,6 +200,36 @@ builtInFuns = S.fromList [
 
 ------------------------------------------------------------
 -- < Utility functions for the AST > -----------------------
+
+strToRelOp :: String -> Float -> Float -> Bool
+strToRelOp o = 
+    case o of 
+        "<"  -> (<)
+        "<=" -> (<=)
+        ">"  -> (>)
+        ">=" -> (>=)
+        _    -> error $ "Error in strToRelOp: This is not a relational operator: " ++ o
+        
+strToUnOp :: String -> Float -> Float
+strToUnOp o = 
+    case o of 
+        "+" -> (0+)
+        "-" -> (0-)
+        _   -> error $ "Error in strToUnOp: This is not an unary operator: " ++ o
+
+strToBoolOp :: String -> Bool -> Bool -> Bool
+strToBoolOp o = 
+    case o of 
+        "and" -> (&&)
+        "or"  -> (||)
+        _     -> error $ "Error in strToBoolOp: This is not a boolean operator: " ++ o
+
+strToCompOp :: Eq a => String -> a -> a -> Bool
+strToCompOp o =
+    case o of 
+        "="  -> (==)
+        "<>" -> (/=)
+        _    -> error $ "Error in strToCompOp: This is not a boolean operator: " ++ o
 
 -- Aux function: Checks if an Exp is a constant, bool or real
 isConstant :: Exp -> Bool
