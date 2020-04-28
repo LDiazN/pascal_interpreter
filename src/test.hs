@@ -3,6 +3,7 @@ import Pascal.Data
 import Pascal.Parser
 import Pascal.Wrapper
 import Pascal.Analyzer
+import Pascal.Interpret
 import System.Environment
 import qualified Data.ByteString.Lazy.Char8 as BLC
 
@@ -18,5 +19,6 @@ main = do
                         prog <- analyzeAST tks
                         case prog of
                             Left  s -> putStrLn s
-                            Right p -> putStr . printMainProg $ p
-
+                            Right p -> do
+                                        status <-  interpret p
+                                        print status

@@ -187,6 +187,7 @@ data Program = Program{
 
 type MainProgram = (String,Program)
 
+--Set of built-in functions
 builtInFuns :: S.Set String
 builtInFuns = S.fromList [
                             "readln",
@@ -230,6 +231,17 @@ strToCompOp o =
         "="  -> (==)
         "<>" -> (/=)
         _    -> error $ "Error in strToCompOp: This is not a boolean operator: " ++ o
+
+strToBinOp :: String -> Float -> Float -> Float
+strToBinOp o = 
+    case o of 
+        "+" -> (+)
+        "-" -> (-)
+        "*" -> (*)
+        "/" -> (/)
+        "%" -> mod'
+        _   -> error $ "Error in strToBinOp: This is not an binary operator: " ++ o
+
 
 -- Aux function: Checks if an Exp is a constant, bool or real
 isConstant :: Exp -> Bool
@@ -366,11 +378,7 @@ reduceConstantBool CompOp{} = error
 
 reduceConstantBool be@(RelOp o (NumExpr ne1) (NumExpr ne2)) = 
     let 
-        op = case o of 
-                ">"  -> (>)
-                "<"  -> (<)
-                ">=" -> (>=)
-                "<=" -> (<=)
+        op = strToRelOp o
 
 
         newOp1 = reduceConstantNum ne1
@@ -383,7 +391,7 @@ reduceConstantBool be@(RelOp o (NumExpr ne1) (NumExpr ne2)) =
             | isNothing newOp1 || isNothing newOp2 = Nothing
             | isNumConstant newOp1' && isNumConstant newOp2' = 
                 Just . btoExp $ op (numVal newOp1')  (numVal newOp2')
-            | otherwise = Just be{compArg1 = NumExpr newOp1', compArg2 = NumExpr newOp2'}
+            | otherwise = Just be{relOprn1 = NumExpr newOp1', relOprn2 = NumExpr newOp2'}
     in newExp
 
 reduceConstantBool RelOp{} = error

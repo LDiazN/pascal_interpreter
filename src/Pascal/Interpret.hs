@@ -104,10 +104,158 @@ runProgram D.Program{D.progDecl = pd, D.progInstrs = instrs} = do
             
             return ret
 
+        --Run if 
+        runInst D.If{D.ifCond = expr, D.succInst=si, D.failInst = fi, D.ipos=p} = do
+            val' <- eval expr
+            st   <- get
+            
+            case val' of
+                Left err -> return $ Error p err
+                Right (ST.BoolVar b) ->
+                    do 
+                        let 
+                            inst
+                                | b = si
+                                | otherwise = fi
+                        put $ ST.pushEmptyScope st
+                        status <- runInst inst
+                        resSt  <- get    
+                        put $ ST.popScope resSt
+                        case status of
+                            err@Error{} -> return err
+                            Break       -> return Break
+                            Ok          -> return Ok
+                            _           -> return Continue
+                _ -> error "error in runInst: not a valid expression in if condition"
 
+        -- run while             
+        runInst w@D.While{D.whCond = expr, D.whBody = inst, D.wpos = p} = do
+            val' <- eval expr
+            st   <- get
+            
+            case val' of 
+                Left err -> return $ Error p err
+                Right (ST.BoolVar False) -> return Continue
+                Right (ST.BoolVar True)  ->
+                    do
+                        put $ ST.pushEmptyScope st
+                        status <- runInst inst
+                        resSt  <- get
+                        put $ ST.popScope resSt
+
+                        case status of
+                            err@Error{} -> return err
+                            Break       -> return Continue
+                            _           -> runInst w
+                _ -> error "error in runInst: not a valid expression in while condition"
+        -- run
+        runInst D.For{D.forIter = s, D.forInitVal = expr1, D.forEndVal = expr2, 
+                      D.forBody = fbody, D.forIncr = incr, D.fpos = p} = do
+            --Evaluate both expressions
+            val1' <- eval expr1
+            val2' <- eval expr2
+            --If one of them failed, then return an error
+            if isLeft val1'
+                then return $ Error p (fromLeft UnknownError val1')
+            else if isLeft val2'
+                then return $ Error p (fromLeft UnknownError val2')
+            --Otherwise, run a while statement built from the For conditions
+            else do
+                let 
+                    op = case incr of
+                            "to"     -> "+"
+                            "downto" -> "-" 
+                            b        -> error $ "unvalid operation in for statement: " ++ b
+                    rel = case incr of
+                            "to"     -> "<="
+                            "downto" -> ">=" 
+                            b        -> error $ "unvalid operation in for statement: " ++ b
+                    --We build an expression like "i + 1"
+                    operation = D.NumExpr $ D.Op2 op (D.NumExpr . D.NumVar $ s) (D.NumExpr . D.NumConst $ 1) 
+                    -- i := init value
+                    initAssign = D.Assign{
+                                        D.assVarId = s, 
+                                        D.assVal = D.NumExpr . D.NumConst . ST.rval . fromRight' $ val1',
+                                        D.assPos = p
+                                        }
+                    -- i := i + 1 
+                    incrAssing = D.Assign{
+                                        D.assVarId = s, 
+                                        D.assVal = operation,
+                                        D.assPos = p
+                                        }
+                    -- Condition to check at every iteration
+                    condition = D.BoolExpr $ 
+                                    D.RelOp rel (D.NumExpr . D.NumVar $ s) 
+                                    (D.NumExpr . D.NumConst . ST.rval . fromRight' $ val2')
+                    -- We are going to simulate a while statement
+                    loop = do
+                        check <- eval condition
+                        case check of
+                            Left err -> return $ Error p err
+                            Right (ST.BoolVar True) -> 
+                                do 
+                                    status <- runInst fbody
+                                    case status of
+                                        err@Error{} -> return err
+                                        Break       -> return Continue
+                                        _           -> do 
+                                                        runInst incrAssing
+                                                        loop
+                            Right (ST.BoolVar False) -> return Continue
+                --Init iterator & run the loop
+                status <- runInst initAssign
+                case status of 
+                    err@Error{} -> return err
+                    _           -> do
+                        st <- get
+                        put $ ST.pushEmptyScope st
+                        newStatus <- loop
+                        resSt <- get
+                        put $ ST.popScope resSt
+                        return newStatus 
+                 
+        --Run case 
+        runInst D.Case{D.caseExp = expr, D.caseGuards = guards, D.caseElse = celse, D.cpos = p} = do
+            val' <- eval expr 
+            case val' of 
+                Left err -> return $ Error p err
+                Right symt -> do
+                    guards' <- mapM (eval . fst)  guards
+                    let
+                        match = [ t | (s,t) <- zip (rights guards') (map snd guards), s==symt ]
+                        inst
+                            | null match = celse
+                            | otherwise = head match
+                        
+                    st <- get
+                    put $ ST.pushEmptyScope st
+                    status <- runInst inst
+                    resSt <- get
+                    put $ ST.popScope resSt
+                    return status
+        
+        runInst D.ProcCall{D.procName = s, D.procCallArgs = args, D.pcallPos = p} = do
+            status <- runFunc' s args
+            case status of 
+                err@Error{} -> return err{errPos = p}
+                x           -> return Continue
+                        
 
         ----
         runInst _ = return Continue
+--Utility: run a function with the given  name
+runFunc' :: String -> [D.Exp] -> RetState Status
+runFunc' s args = do
+    st <- get
+    let 
+        sym' 
+            | s `elem`  (ST.funcStack st) =  ST.findFunc s st
+            | otherwise = ST.findSym s st
+
+    case sym' of
+        Nothing  -> error $ "Error in runFunc': this is not a valid function: " ++ s
+        Just sym -> runFunc sym args
 
 runFunc :: ST.Symbol -> [D.Exp] -> RetState Status
 runFunc sym@ST.Symbol{ST.symType=f@ST.Function{}} exprs = do
@@ -142,8 +290,8 @@ runFunc sym@ST.Symbol{ST.symType=f@ST.Function{}} exprs = do
         -- the name of the function in case this function requires a 
         -- return type
         -- push an empty scope where all the function variables 
-        -- will be declared.
-        st' = ST.pushEmptyScope st
+        -- will be declared. We have to add this function to the funcStack 
+        st' = ST.pushFunc fname . ST.pushEmptyScope $ st
         newSt = foldl (\b a -> fromJust $ ST.insertSym a b) st' newSyms
 
     
@@ -152,7 +300,7 @@ runFunc sym@ST.Symbol{ST.symType=f@ST.Function{}} exprs = do
             put newSt
             funStatus <- runProgram fbody
             resSt     <- get
-            put $ ST.popScope resSt
+            put $ ST.popFunc . ST.popScope $ resSt
 
             case funStatus of
                 err@(Error _ _) -> return  err
@@ -239,14 +387,8 @@ evalNumExp D.Op1{D.unOp = o, D.unOprn = opr} = do
     return  ret
 
 evalNumExp D.NumFunCall{D.numFuncId = s, D.numFunArgs = exprs} = do
-    st <- get 
-    let 
-        sym' = ST.findSym s st
-        sym 
-            | isNothing sym' = error $ "error in evalNumExp: this is not a valid function: " ++ s
-            | otherwise = fromJust sym'
-        
-    ret <- runFunc sym exprs
+    st  <- get 
+    ret <- runFunc' s exprs
     case ret of 
         Ok  -> error $ "error in evalNumExp: this is a procedure, not a function: " ++ s
         FuncReturn (ST.RealVar v) -> return $  Right v
@@ -272,13 +414,7 @@ evalBoolExp D.BoolVar{D.boolVarId = s} = do
 
 evalBoolExp D.BoolFunCall{D.boolFuncId = s, D.boolFunArgs = exprs} = do
     st <- get
-    let 
-        sym' = ST.findSym s st
-        sym
-            | isNothing sym' = error $ "Error in evalBoolExp: this is not a valid symbol: " ++ s
-            | otherwise = fromJust sym' 
-    
-    res <- runFunc sym exprs
+    res <- runFunc' s exprs
     case res of
         Ok                  -> error $ "Error in evalBoolExp: this is not a boolean function: " ++ s
         Error{errClass=err} -> return $ Left err
@@ -352,7 +488,15 @@ evalBoolExp D.OpB{D.boolOp = o, D.boolOprn1 = opr1, D.boolOprn2 = opr2} = do
         Right _ -> error "Error in evalBoolExp: this is not a valid booleam expression"
     
 
+-- Aux function: get the right value from an Either a b,
+-- but it may cause an error if the arg is left
+fromLeft' :: Either a b -> a
+fromLeft' (Left x) = x
+fromLeft' _ = error "Error in fromLeft': Cannot get Left value from a Right value"
 
+fromRight' :: Either a b -> b
+fromRight' (Right x) = x
+fromRight' _ = error "Error in fromRight': Cannot get Right value from a Left value"
 
-
-
+io :: IO a -> StateT RunState IO a
+io = liftIO 

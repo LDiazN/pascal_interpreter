@@ -154,7 +154,9 @@ Declarations :: {[Declaration]}
 
 FuncDeclar   :: {Declaration} --Declare procedure or function
              : function name '(' FuncArgsDec ')' ':' DataType ';' Program ';' { Function (getId $2) $4 $7 $9 (getPos $2)}
-             | procedure name '(' FuncArgsDec ')' ';' Program ';' {Function (getId $2) $4 NoneT $7 (getPos $2)}
+             | function name '(' ')' ':' DataType ';' Program ';' { Function (getId $2) [] $6 $8 (getPos $2)}
+             | procedure name '(' FuncArgsDec ')' ';' Program ';' { Function (getId $2) $4 NoneT $7 (getPos $2)}
+             | procedure name '(' ')' ';' Program ';'             { Function (getId $2) [] NoneT $6 (getPos $2)}
 
 FuncArgsDec  :: {[(String, DataType)]}
              : VarDeclars2                      {reverse [ (getId t, dt) | (t, dt) <- $1]}

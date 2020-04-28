@@ -88,6 +88,10 @@ data ErrClass = Ok
                 -- loop control out of context (continue or break
                 -- out of loop statement)
               | LoopCntrlOOC 
+                --iterator variable assign
+              | UnvLoopAssign{
+                  itVar :: String
+              } 
                 deriving(Eq)
 
 -- Main error type
@@ -116,14 +120,18 @@ data ContextState = ContextState{
                         --nested function declarations
                         checkingFun :: [String],
                         --If the function checked is ok
-                        funOk :: Bool
+                        funOk :: Bool,
+                        --Stack of for variables. You can't assign an
+                        --iterator variable
+                        iters :: [String]
+
                     }
 
 type RetState a  = StateT ContextState IO a
 
 analyzeAST :: D.MainProgram -> IO (Either String D.MainProgram)
 analyzeAST mp = do 
-    (p, state) <- runStateT (analyzer mp) (ContextState ST.newTable [] [Program] [] False )
+    (p, state) <- runStateT (analyzer mp) (ContextState ST.newTable [] [Program] [] False [])
 
     let 
         errs = errors state
@@ -210,7 +218,7 @@ analyzer' p@D.Program{D.progInstrs = pi, D.progDecl = pd} = do
                 newErrs  = case errFname of
                                 Ok -> errs
                                 _  -> ContextError decpos errFname : errs
-                newSt'   = ST.pushEmptyScope $ fromMaybe st (ST.insertSym newSym st)
+                newSt'   = ST.pushFunc fname . ST.pushEmptyScope $ fromMaybe st (ST.insertSym newSym st)
                  
             --simulate
             put state{  errors = newErrs, 
@@ -229,7 +237,7 @@ analyzer' p@D.Program{D.progInstrs = pi, D.progDecl = pd} = do
             resultState <- get
             put resultState{
                     analysisState = tail . analysisState $ resultState,
-                    symTable = ST.popScope . symTable $ resultState,
+                    symTable    = ST.popFunc . ST.popScope . symTable $ resultState,
                     checkingFun = tail . checkingFun $ resultState,
                     funOk = False
                 }
@@ -252,7 +260,7 @@ analyzer' p@D.Program{D.progInstrs = pi, D.progDecl = pd} = do
             return b{D.blockInsts = newInst}
         --Check assign
         checkStmnt a@D.Assign{D.assVarId = s, D.assVal = expr, D.assPos = p} = do
-            state@ContextState{errors = errs, symTable = st, checkingFun = cf} <- get
+            state@ContextState{errors = errs, symTable = st, checkingFun = cf, iters=its} <- get
             let 
                 --Expression checking
                 expErrs = case cleaned' of
@@ -268,7 +276,7 @@ analyzer' p@D.Program{D.progInstrs = pi, D.progDecl = pd} = do
                     | ST.isBoolVar sym' = D.BooleanT
                     | ST.isRealVar sym' = D.RealT
                     | otherwise = error "failed to check assign"
-
+                isIter = filter (s==) its
                 -- Creating cleaned expression
                 newExp = cleaned
 
@@ -284,6 +292,8 @@ analyzer' p@D.Program{D.progInstrs = pi, D.progDecl = pd} = do
                             expErrs
                     | stype /= expType = 
                             [UnmatchTypesAssign s stype expType]
+                    | not (null isIter) =
+                            [UnvLoopAssign s]
                     | otherwise = [] 
                 newErrs' = [ContextError p s | s <- newErrs] ++ errs
                 --Function return checking
@@ -382,6 +392,7 @@ analyzer' p@D.Program{D.progInstrs = pi, D.progDecl = pd} = do
         checkStmnt f@D.For{} = do
             state@ContextState{ symTable = st,
                                 errors = errs,
+                                iters = its,
                                 analysisState = states} <- get
             let 
                 --For data:
@@ -428,7 +439,8 @@ analyzer' p@D.Program{D.progInstrs = pi, D.progDecl = pd} = do
             put state{
                     symTable = newSt,
                     analysisState = newStates,
-                    errors = newErrs' ++ errs
+                    errors = newErrs' ++ errs,
+                    iters  = iter:its
                 }
             newBody <- checkStmnt forBody
             --Get resulting state
@@ -437,7 +449,8 @@ analyzer' p@D.Program{D.progInstrs = pi, D.progDecl = pd} = do
             --pop loop state and current scope
             put finalState{
                 symTable = ST.popScope . symTable $ finalState,
-                analysisState = tail . analysisState $ finalState
+                analysisState = tail . analysisState $ finalState,
+                iters = tail . iters $ finalState
             }
             return newFor{D.forBody = newBody}
 
@@ -509,18 +522,12 @@ analyzer' p@D.Program{D.progInstrs = pi, D.progDecl = pd} = do
         checkStmnt fc@D.ProcCall{D.procName = s, D.procCallArgs = args, D.pcallPos = p} = do
             state@ContextState{symTable = st, errors = errs} <- get
             let 
-                sym' = ST.findSym s st
                 newArgs 
                     | null newErrs = rights . map (`cleanExpr` st) $ args
                     | otherwise = args
                 --Check errors:
-                funErrs = checkFun (fromJust sym') args st
-                newErrs
-                    | isNothing sym' = 
-                        [ContextError p (UndefinedRef s)]
-                    | not (null funErrs) = 
-                        [ContextError p s | s <- funErrs ]
-                    | otherwise = []
+                newErrs = [ ContextError p err | err <- fromLeft [] (checkFun' s args st)]
+                            
 
             unless (null newErrs) $ put state{errors = newErrs ++ errs}
 
@@ -585,17 +592,10 @@ checkExpr D.IdExpr{D.idExpr = s} st =
 --Check function call
 checkExpr D.FunExpr{D.funExpId = s, D.funExpArgs = args, D.callPos = p} st = 
     let 
-        sym       = ST.findSym s st 
-        sym'      = fromJust sym
-        isBuiltIn = S.member s D.builtInFuns
-        argsErrs  = checkFun sym' args st
-        newErrs 
-            | isNothing sym && 
-                not isBuiltIn        = [UndefinedRef s]
-            | ST.isProc sym'         = [UndeProcRef s] 
-            | not (ST.isFunc sym')   = [UndeVarRef s]
-            | not (null argsErrs)    =  argsErrs 
-            | otherwise = []
+        newErrs = 
+            case checkFun' s args st of
+                Left errs -> errs
+                Right sym -> [UndeProcRef s | ST.isProc sym]
     in newErrs
 
 checkExpr D.BinaryOp{D.opert = o, D.oper1 = e1, D.oper2 = e2} st = 
@@ -678,8 +678,32 @@ checkFun sym@ST.Symbol{ST.symType = f@ST.Function{}} exps st =
     in errs
 
 checkFun ST.Symbol{ST.symId = s} _ _ = error $ 
-    "error calling checkFun: this symbol is not a function: " ++
-    s
+    "error calling checkFun: this symbol is not a function: " ++ s
+
+--aux function: give a function name, its formal parameters, and the symbol table, 
+--return either a list of errors in the function call or the symbol refered by the name.
+checkFun' :: String -> [D.Exp] -> ST.SymbolTable -> Either [ErrClass] ST.Symbol
+checkFun' s args st =
+    let 
+        sym       
+            | elem s (ST.funcStack st) = ST.findFunc s st
+            | otherwise= ST.findSym s st 
+        sym'      = fromJust sym
+        
+        isBuiltIn = S.member s D.builtInFuns
+        argsErrs  = checkFun sym' args st
+        newErrs 
+            | isNothing sym && 
+                not isBuiltIn        = [UndefinedRef s]
+            | ST.isBoolVar sym' || ST.isRealVar sym'  = [UndeVarRef s]
+            | not (null argsErrs)    =  argsErrs 
+            | otherwise = []
+        
+        ret 
+            | null newErrs = Right sym'
+            | otherwise = Left newErrs
+    in ret 
+
 
 -- aux function: Return the return value of a valid exp
 getType :: D.Exp -> ST.SymbolTable -> D.DataType
@@ -688,11 +712,14 @@ getType D.NumExpr{}  _ = D.RealT
 
 getType D.FunExpr{D.funExpId = s} st = 
     let 
-        sym  = ST.findSym s st
+        sym 
+            | elem s (ST.funcStack st)  = ST.findFunc s st
+            | otherwise = ST.findSym s st
+            
         sym' = fromJust sym
 
         dtype
-            | isNothing sym || not (ST.isFunc sym') = 
+            | isNothing sym || not (ST.isFunc sym')  = 
                 error $ "error in getType, this is not a valid function: " ++ s 
             | otherwise = ST.funcType . ST.symType $ sym'
     in dtype
@@ -790,7 +817,9 @@ reduceExpr D.IdExpr{D.idExpr = s} st =
     
 reduceExpr D.FunExpr{D.funExpId = s, D.funExpArgs = args} st = 
     let 
-        sym  = ST.findSym s st
+        sym  
+            | elem s (ST.funcStack st) = ST.findFunc s st
+            | otherwise = ST.findSym s st
         sym' = fromJust sym
         ftype = ST.funcType . ST.symType $ sym'
         newArgs = rights . map (`cleanExpr` st) $ args
@@ -936,6 +965,8 @@ instance Show ErrClass where
     show LoopCntrlOOC = 
         "'continue' or 'break' statement found out of loop"
     
+    show (UnvLoopAssign s) = 
+        "Illegal assignment to for-loop variable: " ++ s
 -- Needed to use IO within State monad context
 io :: IO a -> StateT ContextState IO a
 io = liftIO  

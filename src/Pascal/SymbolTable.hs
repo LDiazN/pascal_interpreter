@@ -44,15 +44,24 @@ data SymbolTable = SymbolTable{
                     --Stack of currently available scopes
                     scopeStk :: [Int], 
                     -- Next scope available to push
-                    scopeCnt :: Int
+                    scopeCnt :: Int,
+                    -- Stack of currently available functions. Since 
+                    -- a name could refer both to a function or a variable in the 
+                    -- same context in recursive function calls, we have to 
+                    -- infer which one we are looking for. If the name is
+                    -- stacked, it means  that such name could refer to the return value or 
+                    -- the recursive function call
+                    funcStack :: [String]
                     }
                     deriving(Show, Eq)
+
 -- Contructor for SymbolTables
 newTable :: SymbolTable
 newTable = SymbolTable{
             symMap = M.empty,
             scopeStk = [0],
-            scopeCnt = 1
+            scopeCnt = 1,
+            funcStack = []
             }
 
 -- Creates a new empty scope
@@ -75,22 +84,37 @@ popScope st@SymbolTable{ scopeStk = x:xs } = st{scopeStk = xs}
 findSym ::  String      -> --Symbol name
             SymbolTable -> --Table to search in
             Maybe Symbol
-findSym s st = 
+findSym s  = findSym' s (const True) 
+
+--Find the frist symbol that holds a property
+findSym' :: String           -> --Symbol name
+            (Symbol -> Bool) -> --Some predicate
+            SymbolTable      -> --Table to search in
+            Maybe Symbol
+findSym' s f st = 
     let 
         smap = symMap st
         stk  = scopeStk st
         mtch = M.lookup s smap
 
-        sym = (findSym' stk =<< mtch)
+        sym = (findSym'' stk =<< mtch)
         --Aux function: finds the first symbol available in the 
         --current context
-        findSym' :: [Int] -> [Symbol] -> Maybe Symbol
-        findSym' [] _ = Nothing
-        findSym' _ [] = Nothing
-        findSym' (x:xs) l = case L.find ((==x) . symScope) l of
+        findSym'':: [Int] -> [Symbol] -> Maybe Symbol
+        findSym'' [] _ = Nothing
+        findSym'' _ [] = Nothing
+        findSym'' (x:xs) l = case L.find (\s -> ((==x) . symScope $ s) && f s ) l of
                                 Just sym -> Just sym
-                                Nothing  -> findSym' xs l
+                                Nothing  -> findSym'' xs l
     in sym
+
+--Find a function whose name could be a variable or a function
+findFunc :: String      -> --Symbol name
+            SymbolTable -> --Table to search in
+            Maybe Symbol
+findFunc s st 
+    | notElem s . funcStack $ st = Nothing
+    | otherwise = findSym' s isFunc st
 
 {-
     In order to keep the table consistent, 
@@ -140,6 +164,21 @@ removeSym s st =
 
 ------------------------------------------------------------------
 -- < Symbol Table utilities > ------------------------------------
+
+-- Push a function name into the function stack
+pushFunc :: String -> SymbolTable -> SymbolTable
+pushFunc s st@SymbolTable{funcStack = funcs} = st{funcStack = s:funcs}
+
+-- Pop a function from the function stack
+popFunc :: SymbolTable -> SymbolTable
+popFunc st@SymbolTable{funcStack = funcs}
+    | null funcs = st
+    | otherwise  = st{funcStack = tail funcs}
+
+-- get the top of the function stack. If no function is stacked, return ""
+topFunc :: SymbolTable -> String
+topFunc SymbolTable{funcStack = []} = ""
+topFunc SymbolTable{funcStack = x:xs} = x
 
 -- Replace the value of the first value that checks the predicate
 replace :: Eq a => [a] -> (a->Bool) -> a -> [a]
