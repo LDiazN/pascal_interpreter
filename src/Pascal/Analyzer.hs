@@ -3,7 +3,10 @@
     perform the static analysis of a pascal program
     given the AST of such program
 -}
-module Pascal.Analyzer where
+module Pascal.Analyzer
+    (   analyzeAST
+
+    ) where
 
 import Control.Monad
 import Control.Monad.State
@@ -92,6 +95,8 @@ data ErrClass = Ok
               | UnvLoopAssign{
                   itVar :: String
               } 
+                --The only possible args in readln function is a single variable
+              | UnvReadlnArgs
                 deriving(Eq)
 
 -- Main error type
@@ -226,11 +231,11 @@ analyzer' p@D.Program{D.progInstrs = pi, D.progDecl = pd} = do
                         checkingFun = fname:checkingFun state,
                         funOk = False
                         }
-            -- add the args variables to the current context
-            mapM_ checkDecl args
             -- if the function is a function with return value, 
             -- add one more variable, the return variable
             when (ftype /= D.NoneT) (void . checkDecl $ D.Variable fname ftype decpos)
+            -- add the args variables to the current context
+            mapM_ checkDecl args
             --run the analyzer in the function body 
             newBody <- analyzer' fbody
             --Pop the current context & the analysis state
@@ -519,15 +524,25 @@ analyzer' p@D.Program{D.progInstrs = pi, D.progDecl = pd} = do
                 D.caseElse     = newElse    
                     }
 
+        
+        --check procedure call
         checkStmnt fc@D.ProcCall{D.procName = s, D.procCallArgs = args, D.pcallPos = p} = do
             state@ContextState{symTable = st, errors = errs} <- get
             let 
-                newArgs 
-                    | null newErrs = rights . map (`cleanExpr` st) $ args
-                    | otherwise = args
+                newArgs' = map (`cleanExpr` st) args
+                newArgs = rights newArgs'
+
                 --Check errors:
-                newErrs = [ ContextError p err | err <- fromLeft [] (checkFun' s args st)]
-                            
+                newErrs 
+                    | s==D.inputFun  = [ ContextError p UnvReadlnArgs | length newArgs /= 1 ||  not (isVar . head $ newArgs)]
+                    | s==D.outputFun = [ContextError p err | err <- concat . lefts $ newArgs']
+                    | otherwise = [ ContextError p err | err <- fromLeft [] (checkFun' s args st)]
+
+                isVar :: D.Exp -> Bool
+                isVar D.IdExpr{} = True
+                isVar (D.NumExpr D.NumVar{}) = True
+                isVar (D.BoolExpr D.BoolVar{}) = True
+                isVar _ = False
 
             unless (null newErrs) $ put state{errors = newErrs ++ errs}
 
@@ -693,14 +708,12 @@ checkFun' s args st =
         isBuiltIn = S.member s D.builtInFuns
         argsErrs  = checkFun sym' args st
         newErrs 
-            | isNothing sym && 
-                not isBuiltIn        = [UndefinedRef s]
+            | isNothing sym = [UndefinedRef s]
             | ST.isBoolVar sym' || ST.isRealVar sym'  = [UndeVarRef s]
             | not (null argsErrs)    =  argsErrs 
             | otherwise = []
         
-        ret 
-            | null newErrs = Right sym'
+        ret | null newErrs = Right sym'
             | otherwise = Left newErrs
     in ret 
 
@@ -738,7 +751,7 @@ getType D.IdExpr{D.idExpr = s} st =
     in dtype
     
 getType D.BinaryOp{D.opert = o} _
-    | o=="+" || o=="-" || o=="*" || o=="/" || o=="%" = D.RealT
+    | o=="+" || o=="-" || o=="*" || o=="/" || o=="mod" = D.RealT
     | otherwise = D.BooleanT
 
 
@@ -967,6 +980,9 @@ instance Show ErrClass where
     
     show (UnvLoopAssign s) = 
         "Illegal assignment to for-loop variable: " ++ s
+    
+    show  UnvReadlnArgs  = 
+        "The only possible argument in 'readln' is a single variable"
 -- Needed to use IO within State monad context
 io :: IO a -> StateT ContextState IO a
 io = liftIO  

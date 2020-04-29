@@ -57,12 +57,27 @@ data SymbolTable = SymbolTable{
 
 -- Contructor for SymbolTables
 newTable :: SymbolTable
-newTable = SymbolTable{
-            symMap = M.empty,
-            scopeStk = [0],
-            scopeCnt = 1,
-            funcStack = []
-            }
+newTable = foldl (\b a -> fromJust $ insertSym a b) initTable numFuns
+    where 
+        initTable = SymbolTable{
+                        symMap = M.empty,
+                        scopeStk = [0],
+                        scopeCnt = 1,
+                        funcStack = []
+                        }
+        numFuns = [ Symbol{
+                        symId = s,
+                        symScope = -1,
+                        symPos = (0,0),
+                        symType = Function{
+                                fbid = 0,
+                                funcArgs = [("x", D.RealT)],
+                                funcType = D.RealT,
+                                funcBody = D.Program (D.Block []) []
+                                }
+                        } | s <-  M.keys D.numFuns]
+    
+        
 
 -- Creates a new empty scope
 pushEmptyScope :: SymbolTable -> SymbolTable
@@ -161,6 +176,13 @@ removeSym s st =
                     Just l  -> st{symMap = 
                                 M.insert symName (filter (/= s) l) smap } 
     in newSt
+
+--Remove sym by name: remove the first symbol that matches a given name
+removeSym' :: String -> SymbolTable -> SymbolTable
+removeSym' s st =
+    case findSym s st of
+        Nothing -> st
+        Just sym-> removeSym sym st
 
 ------------------------------------------------------------------
 -- < Symbol Table utilities > ------------------------------------

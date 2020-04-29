@@ -13,16 +13,21 @@ module Pascal.Data
         MainProgram,
         printMainProg,
         builtInFuns,
+        ioFuns,
+        numFuns,
         reduceConstant,
         isConstant,
         strToBoolOp,
         strToCompOp,
         strToRelOp,
-        strToUnOp
+        strToUnOp,
+        inputFun,
+        outputFun
     ) where
 
 ---------------------------------------------------------------------------------
 import qualified Data.Set as S
+import qualified Data.Map as M
 import Data.Maybe
 import Data.Fixed
 ---------------------------------------------------------------------------------
@@ -187,17 +192,39 @@ data Program = Program{
 
 type MainProgram = (String,Program)
 
+--I/O with stdin/stdout functions:
+inputFun :: String
+inputFun = "readln"
+outputFun :: String
+outputFun = "writeln"
+
 --Set of built-in functions
 builtInFuns :: S.Set String
 builtInFuns = S.fromList [
-                            "readln",
-                            "writeln",
+                            inputFun,
+                            outputFun,
                             "sin",
                             "cos",
                             "sqrt",
                             "exp",
                             "ln"
                         ]
+-- Set of io functions
+ioFuns :: S.Set String
+ioFuns = S.fromList [
+                    inputFun,
+                    outputFun
+                    ]
+
+-- set of numeric functions:
+numFuns :: M.Map String (Float -> Float)
+numFuns = M.fromList [
+            ("sin", sin),
+            ("cos", cos),
+            ("sqrt", sqrt),
+            ("exp", exp),
+            ("ln", log)
+            ]
 
 ------------------------------------------------------------
 -- < Utility functions for the AST > -----------------------
@@ -239,7 +266,7 @@ strToBinOp o =
         "-" -> (-)
         "*" -> (*)
         "/" -> (/)
-        "%" -> mod'
+        "mod" -> mod'
         _   -> error $ "Error in strToBinOp: This is not an binary operator: " ++ o
 
 

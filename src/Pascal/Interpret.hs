@@ -18,6 +18,7 @@ import Control.Monad.State
 import qualified Data.List  as L
 import qualified Data.Map   as M
 import qualified Data.Set   as S
+import qualified Text.Read  as TR
 -------------------------------------------------------------------------------
 
 -- < Pascal module Imports > --------------------------------------------------
@@ -32,7 +33,18 @@ data ErrClass = DividingByZero
                   unvArgFun :: String,  --function name
                   expErr :: [ErrClass]    --errors in the args
               } 
-              | UnknownError deriving(Show,Eq)
+              | NegativeLog{
+                  negVal :: Float
+              }
+              | UnvalidReadInpt {
+                  unvInpt :: String
+              }
+              | UnmtchTypeRead {
+                  unmtVarName :: String,
+                  unmtVarType :: D.DataType,
+                  unmtInptType :: D.DataType
+              }
+              | UnknownError deriving(Eq)
 
 
 -- Everytime an instruction is executed, this execution returns a
@@ -47,7 +59,7 @@ data Status = Ok                    --Execution ended ok
             | FuncReturn{           --Data returned by a function
                 retVal :: ST.SymType
                 }
-            deriving(Show,Eq)
+            deriving(Eq)
 
 type RunState = ST.SymbolTable  --Just renaming the symbol table as the state object
 
@@ -59,7 +71,7 @@ interpret (_,p) = interpret' p
 interpret' :: D.Program -> IO Status
 interpret' prog = do
     (status,state) <- runStateT (runProgram prog) ST.newTable
-    print state
+    --print state
     return status
 
 
@@ -70,9 +82,16 @@ runProgram D.Program{D.progDecl = pd, D.progInstrs = instrs} = do
     --Declare every symbol in the declarations
     let 
         newSt = foldl (\b a -> fromJust . (`ST.insertSym` b) . ST.createSym  $ a) st pd
+
+       
+
     --Now that the symbols are declared, run the statements
     put newSt
-    runInst instrs
+    status <- runInst instrs
+    --now we have to free the program memory
+    resSt  <- get
+    put (foldl (\b a -> (`ST.removeSym'` b) . decId $ a) resSt pd )
+    return status
 
     where 
         runInsts ::  [D.Statement] -> RetState Status
@@ -246,16 +265,18 @@ runProgram D.Program{D.progDecl = pd, D.progInstrs = instrs} = do
         runInst _ = return Continue
 --Utility: run a function with the given  name
 runFunc' :: String -> [D.Exp] -> RetState Status
-runFunc' s args = do
-    st <- get
-    let 
-        sym' 
-            | s `elem`  (ST.funcStack st) =  ST.findFunc s st
-            | otherwise = ST.findSym s st
+runFunc' s args 
+    | S.member s D.builtInFuns = runBuiltIn s args
+    | otherwise = do
+        st <- get
+        let 
+            sym' 
+                | s `elem`  ST.funcStack st =  ST.findFunc s st
+                | otherwise = ST.findSym s st
 
-    case sym' of
-        Nothing  -> error $ "Error in runFunc': this is not a valid function: " ++ s
-        Just sym -> runFunc sym args
+        case sym' of
+            Nothing  -> error $ "Error in runFunc': this is not a valid function: " ++ s
+            Just sym -> runFunc sym args
 
 runFunc :: ST.Symbol -> [D.Exp] -> RetState Status
 runFunc sym@ST.Symbol{ST.symType=f@ST.Function{}} exprs = do
@@ -300,7 +321,15 @@ runFunc sym@ST.Symbol{ST.symType=f@ST.Function{}} exprs = do
             put newSt
             funStatus <- runProgram fbody
             resSt     <- get
-            put $ ST.popFunc . ST.popScope $ resSt
+
+            --We have to free the function memory:
+            let 
+                unDecSt = foldl (\b a -> (`ST.removeSym'` b) . fst $ a) resSt fargs
+                unDecSt'
+                    | ftype /= D.NoneT  = ST.removeSym' fname unDecSt
+                    | otherwise = unDecSt
+
+            put $ ST.popFunc . ST.popScope $ unDecSt'
 
             case funStatus of
                 err@(Error _ _) -> return  err
@@ -316,6 +345,80 @@ runFunc sym@ST.Symbol{ST.symType=f@ST.Function{}} exprs = do
 
 runFunc s _ = error $ "Not a valid function symbol type " ++ show s
 
+-- run the built-in functions
+runBuiltIn :: String -> [D.Exp] -> RetState Status
+runBuiltIn s args = do
+    args' <- mapM eval args
+    let 
+        errs = lefts args'
+        vals = rights args'
+
+        printVal :: ST.SymType -> IO()
+        printVal ST.RealVar{ST.rval = r} = putStr . show  $ r
+        printVal ST.BoolVar{ST.bval = b} = putStr . show  $ b
+        printVal s = error $ "Error in runBuiltIn: this is not a printable symbol" ++ show s
+
+        numFun = fromJust $ M.lookup s D.numFuns
+        numVal = ST.rval . head $ vals
+
+    if not (null errs) 
+        then return $ Error (0,0) (UnvalidFuncArgs D.outputFun errs)
+        else if s == D.outputFun then do
+            mapM_ (io . printVal) vals
+            io . putStr $ "\n"
+            return Continue
+        else if s == D.inputFun then do
+            inpt <- io getLine
+            st   <- get
+            let 
+                --We assume that the args are not empty since this program
+                --passed the static analysis
+                varname = case head args of 
+                            D.IdExpr{D.idExpr=s} -> s
+                            D.NumExpr{D.numExpr=D.NumVar{D.numVarId=nid}} -> nid
+                            D.BoolExpr{D.boolExpr=D.BoolVar{D.boolVarId=blid}} -> blid
+                            _ -> error $ "This is not a valid arg for readln function " ++ show args
+                sym'  = ST.findSym varname st
+                sym 
+                    | isNothing sym' = error $ "this is not a valid symbol for readln" ++ varname
+                    | otherwise = fromJust sym'
+                
+                stype 
+                    | ST.isBoolVar sym = D.BooleanT
+                    | ST.isRealVar sym = D.RealT
+                    | otherwise = error "Error in runBuiltin: this is not a valid symbol to assign in readln"
+                
+                mnum = TR.readMaybe inpt :: Maybe Float
+                mbool
+                    | inpt == "true" = Just True
+                    | inpt == "False"= Just False
+                    | otherwise = Nothing
+                
+                intype 
+                    | isJust mbool = D.BooleanT
+                    | isJust mnum  = D.RealT
+                    | otherwise = error "Error un runBuiltIn: cannot parse input"
+
+                ret
+                    | isNothing mbool && isNothing mnum = return $ Error (0,0) (UnvalidReadInpt inpt)
+                    | intype /= stype = return $ Error (0,0) (UnmtchTypeRead varname stype intype)
+                    | stype == D.BooleanT && isJust mbool =  do 
+                        put $ ST.setVal varname (ST.BoolVar . fromJust $ mbool) st
+                        return Continue
+                    | stype == D.RealT && isJust mnum =  do 
+                        put $ ST.setVal varname (ST.RealVar . fromJust $ mnum) st
+                        return Continue
+            --io $ print ret
+            ret 
+    
+        else if M.member s D.numFuns then 
+            if s == "ln" && numVal <= 0
+                then return $ Error (0,0) (NegativeLog numVal)
+                else return . FuncReturn . ST.RealVar . numFun $ numVal
+        else 
+            error $ "Unsupported built in function: " ++ s
+    
+    
 --Eval returns a SymType with the values, or error if some error is found
 eval :: D.Exp -> RetState (Either ErrClass ST.SymType)
 eval D.NumExpr{D.numExpr = expr} = do
@@ -500,3 +603,36 @@ fromRight' _ = error "Error in fromRight': Cannot get Right value from a Left va
 
 io :: IO a -> StateT RunState IO a
 io = liftIO 
+
+decId :: D.Declaration -> String
+decId D.Variable{D.varId = s} = s
+decId D.Function{D.funcId = s} = s
+
+instance Show Status where
+    show Ok = "Succesful execution"
+    show (Error (x,y) err) = 
+        let 
+            errMsg = unlines . map ("  "++) . lines . show $ err
+        in    
+            "Runtime error near of line: " ++ show x ++ ", column: " ++ show y ++ "\n" ++ errMsg
+    show Break = "Break Loop execution"
+    show Continue = "Execute next instruction"
+    show (FuncReturn ret) = "Function execution return value: " ++ show ret
+
+instance Show ErrClass where
+    show DividingByZero = "Dividing by Zero"
+
+    show (UnvalidFuncArgs f errs) = 
+        let 
+            errMsgs = unlines . map("    "++) . concatMap (lines . show) $ errs
+        in
+            "Errors in aguments for function: " ++ f ++ "\n" ++ errMsgs
+    show (NegativeLog v) = "Unvalid argument for 'ln', a non-positive value: " ++ show v
+
+    show (UnvalidReadInpt s) = 
+        "readln couldn't parse input: " ++ s
+
+    show (UnmtchTypeRead s t1 t2) =
+        "Couldn't assign value of type " ++ show t2 ++ " to variable '" ++ s ++ "' of type: " ++ show t1
+
+    show UnknownError = "Unknown Error"
