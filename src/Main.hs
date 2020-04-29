@@ -22,7 +22,7 @@ main = do
       helpMsg     = "-h --help: Show this help"
       noFlagsMsg  = "( no flags currently available )"
       availableFlags = [cleanAStMsg, astMsg, symTableMsg, helpMsg]
-      help = "Use: Pascal [ filename ] { flags }\n  Available Flags: " ++ (unlines . map ("    "++) . concatMap lines) availableFlags
+      help = "Use: Pascal [ filename ] { flags }\n  Available Flags: \n" ++ (unlines . map ("    "++) . concatMap lines) availableFlags
 
     if null args 
       then putStrLn help

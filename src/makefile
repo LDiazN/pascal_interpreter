@@ -15,3 +15,5 @@ clear:
 	rm *.hi *.o
 	rm Pascal/Parser.hs
 	rm Pascal/Lexer.hs
+	rm Pascal/*.hi Pascal/*.o
+	rm pascal
