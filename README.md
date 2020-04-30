@@ -19,25 +19,40 @@ Available features
 ### Pascal Features ###
 
 * **One line comments** : Using `//`
+
 * **Multiline comments** : Using `(**)`  
   We decided to accept nested comments like  
 
         (*
         (*
         *)
+        
 * **boolean variables**  : `boolean`
+
 * **real variables**  : `real`
+
 * **Conditional statements like case or if** : `case exp of`, `if exp then`
+
 * **While loop** : `while exp do`
+
 * **For loop** : `for varname := initVal to/downto finalVal do`  
+
  Note: Since we don't have integer values, we allow real variables to hold the for-loop iterator, and because of that the condition to stop the loop is `varname > finalVal` instead of `varname == finalVal`
+ 
  * **Arithmetic Operators** : `* / + - mod`
+ 
  * **Relational Operators** : `< > <= >=`
+ 
  * **Comparators** : `= <>`
+ 
  * **Boolean Operators** : `or and`
+ 
  * **Functions** : `function f(args:type) : return_type; begin ... end;`
+ 
  * **Procedure** : `procedure p(args:type); begin ... end;`
+ 
  * **Numeric built-in functions** : `sin, cos, ln, exp, sqrt`
+ 
  * **I/O Operations** : `writeln, reanln`  
   Note: In the case of readln, since we don't have String data type, we try to parse the input depending on the type of the argument variable
  
@@ -62,19 +77,23 @@ Or manually:
 
         alex Pascal/Lexer.x
         happy Pascal/Parser.y
-        ghc --make Main.hs -o ./Pascal
+        ghc --make Main.hs -o ./pascal
         
 In case you want to run the project using runhaskell, you have to compile the parser and the lexer:
 
         alex Pascal/Lexer.x
         happy Pascal/Parser.y
 
-
+In case you want to build the project using cabal, you can use the following command in the main folder:
+       
+       cabal install --installdir=.
+       
+And the executable "Pascal" will be installed in the current directory
 
 ### Running ###
-In case you compiled the project with GHC:  
+In case you compiled the project with GHC or cabal:  
 
-        ./Pascal program.pas 
+        ./pascal program.pas 
          
 In case you want to run the project with runhaskell:  
         
@@ -87,19 +106,25 @@ If you run the interpreter without arguments, a description about the available 
        
        ./Pascal
 
-The first argument of the command should always be the pascal file to interpret.
+If you want to run a pascal file, the first argument of the command should always be the pascal file to interpret.
 
 Aditional information
 =====================
 
 ### Test files ###
+
 You can find two sets of test files, working files and error files. The first set, located at `src/TestsOk` contains only working examples of the features implemented. The second one, located at `src/TestsError` contains only programs with errors   
 ### Project Structure ###
 
 These are the main files of this project:
   * **Lexer.x**: We define the token Data in this file and how a string will be separated in tokens. 
+  
   * **Data.hs**: Contains the definition of the AST structure and a set of useful functions to operate it.
+  
   * **Parser.y**: Contains the grammar specification required by happy to produce a Parser, it depends on the data types defined in Data.hs
+  
   * **SymbolTable.hs**: Contains the Data structure that we use to perform the static analysis, the symbol table. A set of functions related to the symbol table if provided too.
+  
   * **Analyzer.hs**: Contains functions to perform the static analysis. When a file is passed to the interpreter, this is splitted in tokens, converted to an AST, and the Analyzer checks that AST to find static errors, such as dividing by zero, undefined references, unvalid function calls, etc. If the analyzer finds some errors, the interpreter won't try to run the program. Otherwise, the analyzer will return a cleaned AST with some little optimizations like constant propagation.
+  
   * **Interpret.hs**: Contains functions to perform the actual running of the program. When a valid AST is passed to the Interpret function provided in this file, the function will return a Status that returns some basinc information about the program, such as if the program ended succesfully or if it failed and why.
