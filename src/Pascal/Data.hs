@@ -21,6 +21,7 @@ module Pascal.Data
         strToCompOp,
         strToRelOp,
         strToUnOp,
+        strToBinOp,
         inputFun,
         outputFun
     ) where
@@ -470,7 +471,7 @@ reduceConstantNum op@Op2{binOp = o,binOprn1 = opr1' , binOprn2 = opr2'} =
         --Any other operation: 
         newExp' 
             | isNothing newOp1 || isNothing newOp2 = Nothing
-            | o == "/" || o=="%" = newExp
+            | o == "/" || o=="mod" = newExp
             | isNumConstant newOp1' && isNumConstant newOp2' =
                 Just . NumConst $ oper oper1Val oper2Val
             | otherwise = Just op{binOprn1 = NumExpr newOp1', binOprn2 = NumExpr newOp2'}

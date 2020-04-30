@@ -69,7 +69,7 @@ tokens :-
   <0> boolean                               { readTkGen }
 
   -- < Operators & separators > --------------------------------
-  <0> [\+]|[\-]|[\*]|[\/]|[\%]              { readTkGen }
+  <0> [\+]|[\-]|[\*]|[\/]| mod              { readTkGen }
   <0> [\=]|\>\=|\<\=|\<|\>|\<\>             { readTkGen }
   <0> and|or|not                            { readTkGen }
   <0> \:\=                                  { readTkGen }

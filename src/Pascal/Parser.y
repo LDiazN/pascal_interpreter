@@ -49,7 +49,7 @@ import Pascal.Lexer
         '-'             { Token _ (TkGen "-")       }
         '*'             { Token _ (TkGen "*")       }
         '/'             { Token _ (TkGen "/")       }
-        '%'             { Token _ (TkGen "%")       }              
+        mod             { Token _ (TkGen "mod")     }              
         '='             { Token _ (TkGen "=")       }
         '>='            { Token _ (TkGen ">=")      }
         '<='            { Token _ (TkGen "<=")      }
@@ -86,14 +86,6 @@ Program      :: { Program }
              : Declarations Block               { Program $2  (reverse $1) }
 
 -- < Execution Statements > ------------------------------------------
-Block        :: {Statement}
-             :  begin  end                      { Block [] }
-             |  begin Statements end            { Block (reverse $2) }
-                
-Statements   :: { [Statement] }
-             : Statement                        { [$1] }
-             | Statements  ';'   Statement      {$3 : $1}
-             | Statements  ';'                  {$1}
 
 Statement    :: { Statement }
              : FuncCall                         { ProcCall (getId . fst $ $1) (snd $1) (getPos . fst $ $1) }
@@ -105,6 +97,15 @@ Statement    :: { Statement }
              | Block                            { $1 }
              | break                            { Break (getPos $1)}
              | continue                         { Continue (getPos $1)}
+
+Block        :: {Statement}
+             :  begin  end                      { Block [] }
+             |  begin Statements end            { Block (reverse $2) }
+                
+Statements   :: { [Statement] }
+             : Statement                        { [$1] }
+             | Statements  ';'   Statement      {$3 : $1}
+             | Statements  ';'                  {$1}
 
 Assign       :: { Statement }
              : name ':=' Expr                   { Assign (getId $1) $3 (getPos $1) }
@@ -124,11 +125,15 @@ IfStatement  :: { Statement }
 
 CaseStmnt    :: { Statement }
              : case Expr of Cases end           { Case $2 $4 Skip (-1) (getPos $1)}
-             
+             | case Expr of Cases ';' end       { Case $2 $4 Skip (-1) (getPos $1)}
+             | case Expr of Cases 
+                else Statement ';' end          { Case $2 $4 $6 (-1) (getPos $1)}
+             | case Expr of Cases ';' 
+                else Statement ';' end          { Case $2 $4 $7 (-1) (getPos $1)}
 
 Cases        :: { [(Exp, Statement)] }
              : Case                             { $1 }
-             | Cases ';' Case ';'               { $1 ++ $3 }
+             | Cases ';' Case                   { $1 ++ $3 }
 
 Case         :: {[(Exp, Statement)]}
              : CaseLabels ':' Statement           { [(e, $3) | e <- $1] }
@@ -239,7 +244,7 @@ AddOpr       :: { String }
 MulOpr       :: { String }
              : '*'                              { "*" }   
              | '/'                              { "/" }   
-             | '%'                              { "%" }   
+             | mod                              { "mod" }   
              | and                              { "and" }
 
 {

@@ -284,7 +284,7 @@ analyzer' D.Program{D.progInstrs = pins, D.progDecl = pdecs} = do
                     | ST.isBoolVar sym' = D.BooleanT
                     | ST.isRealVar sym' = D.RealT
                     | otherwise = error "failed to check assign"
-                isIter = filter (s==) its
+                --isIter = filter (s==) its
                 -- Creating cleaned expression
                 newExp = cleaned
 
@@ -300,7 +300,7 @@ analyzer' D.Program{D.progInstrs = pins, D.progDecl = pdecs} = do
                             expErrs
                     | stype /= expType = 
                             [UnmatchTypesAssign s stype expType]
-                    | not (null isIter) =
+                    | s `elem` its =
                             [UnvLoopAssign s]
                     | otherwise = [] 
                 newErrs' = [ContextError p er | er <- newErrs] ++ errs
@@ -440,6 +440,8 @@ analyzer' D.Program{D.progInstrs = pins, D.progDecl = pdecs} = do
                         ContextError p (UndefinedRef iter) : newErrs
                     | not (ST.isRealVar itSym') && ST.isBoolVar itSym' = 
                         ContextError p (UnmtchExpTypeVar (ST.symId itSym') D.RealT D.BooleanT) : newErrs
+                    | iter `elem` its = 
+                        ContextError p (UnvLoopAssign iter) : newErrs
                     | otherwise = newErrs
                 --new State Data:
                 newStates = Loop:states
@@ -513,7 +515,6 @@ analyzer' D.Program{D.progInstrs = pins, D.progDecl = pdecs} = do
                 errors = newErrs ++ errs
                 }
 
-            io $ print guardStmnts
             newStmnts <- mapM checkStmnt guardStmnts
             newElse   <- checkStmnt csElse
             -- Get the new state and pop the context
@@ -554,7 +555,7 @@ analyzer' D.Program{D.progInstrs = pins, D.progDecl = pdecs} = do
 
             return fc{D.procCallArgs = newArgs}
 
-
+        --Check continue
         checkStmnt c@D.Continue{D.contPos = p} = do
             nstate@ContextState{errors = errs, analysisState = anSt} <- get
             put nstate{
@@ -562,6 +563,7 @@ analyzer' D.Program{D.progInstrs = pins, D.progDecl = pdecs} = do
             }
             return c
 
+        --Check break
         checkStmnt b@D.Break{D.bpos = p} = do
             nstate@ContextState{errors = errs, analysisState = anSt} <- get
             put nstate{
@@ -889,7 +891,7 @@ opInType "+" = D.RealT
 opInType "-" = D.RealT
 opInType "*" = D.RealT
 opInType "/" = D.RealT
-opInType "%" = D.RealT
+opInType "mod" = D.RealT
 opInType "and" = D.BooleanT
 opInType "or"  = D.BooleanT
 opInType "not" = D.BooleanT
@@ -905,7 +907,7 @@ opOutType "+" = D.RealT
 opOutType "-" = D.RealT
 opOutType "*" = D.RealT
 opOutType "/" = D.RealT
-opOutType "%" = D.RealT
+opOutType "mod" = D.RealT
 opOutType "and" = D.BooleanT
 opOutType "or"  = D.BooleanT
 opOutType "not" = D.BooleanT

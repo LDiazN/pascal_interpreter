@@ -29,7 +29,7 @@ import qualified Pascal.SymbolTable as ST
 -- the interpreter, not user errors
 data ErrClass = DividingByZero
               | UnvalidFuncArgs{
-                  unvArgFun :: String,  --function name
+                  unvArgFun :: String,    --function name
                   expErr :: [ErrClass]    --errors in the args
               } 
               | NegativeLog{
@@ -58,6 +58,7 @@ data Status = Ok                    --Execution ended ok
             | FuncReturn{           --Data returned by a function
                 retVal :: ST.SymType
                 }
+            | BreakContinue         --break the loop but continue with the next iteration
             deriving(Eq)
 
 type RunState = ST.SymbolTable  --Just renaming the symbol table as the state object
@@ -104,7 +105,7 @@ runProgram D.Program{D.progDecl = pd, D.progInstrs = instrs} = do
                                     
         runInst :: D.Statement -> RetState Status
         runInst D.Break{} = return Break
-        runInst D.Continue{} = return Ok
+        runInst D.Continue{} = return BreakContinue
         runInst D.Block{D.blockInsts = insts} = runInsts insts
 
         --Run assign
@@ -140,10 +141,10 @@ runProgram D.Program{D.progDecl = pd, D.progInstrs = instrs} = do
                         resSt  <- get    
                         put $ ST.popScope resSt
                         case status of
-                            err@Error{} -> return err
-                            Break       -> return Break
-                            Ok          -> return Ok
-                            _           -> return Continue
+                            err@Error{}   -> return err
+                            Break         -> return Break
+                            BreakContinue -> return BreakContinue
+                            _             -> return Continue
                 _ -> error "error in runInst: not a valid expression in if condition"
 
         -- run while             
@@ -252,7 +253,12 @@ runProgram D.Program{D.progDecl = pd, D.progInstrs = instrs} = do
                     status <- runInst inst
                     resSt <- get
                     put $ ST.popScope resSt
-                    return status
+
+                    case status of 
+                        err@Error{}   -> return err
+                        Break         -> return Break
+                        BreakContinue -> return BreakContinue
+                        _             -> return Continue
         
         runInst D.ProcCall{D.procName = s, D.procCallArgs = args, D.pcallPos = p} = do
             status <- runFunc' s args
@@ -461,13 +467,7 @@ evalNumExp D.Op2{D.binOp = o, D.binOprn1 = opr1, D.binOprn2 = opr2} = do
     let 
         val1  = fromRight 0 val1'
         val2  = fromRight 0 val2'
-        op = case o of
-                "+" -> (+)
-                "-" -> (-)
-                "*" -> (*)
-                "/" -> (/)
-                "%" -> mod'
-                er  -> error $ "unvalid num operator: " ++ er
+        op = D.strToBinOp o
         ret
             | isLeft val1' =  val1'
             | isLeft val2' =  val2'
@@ -610,8 +610,10 @@ instance Show Status where
         in    
             "Runtime error near of line: " ++ show x ++ ", column: " ++ show y ++ "\n" ++ errMsg
     show Break = "Break Loop execution"
+    show BreakContinue = "Break iteration and  continue Loop execution"
     show Continue = "Execute next instruction"
     show (FuncReturn ret) = "Function execution return value: " ++ show ret
+
 
 instance Show ErrClass where
     show DividingByZero = "Dividing by Zero"
