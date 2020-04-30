@@ -10,6 +10,8 @@ Content of this file
   * Running
   * Use
 * Additional information
+  * Test files
+  * Project structure
 
 
 Available features
@@ -60,7 +62,7 @@ Or manually:
 
         alex Pascal/Lexer.x
         happy Pascal/Parser.y
-        ghc --make src/Main.hs -o ./Pascal
+        ghc --make Main.hs -o ./Pascal
         
 In case you want to run the project using runhaskell, you have to compile the parser and the lexer:
 
@@ -91,4 +93,13 @@ Aditional information
 =====================
 
 ### Test files ###
-You can find two sets of test files, working files and error files. The first set, located at `src/TestsOk` contains only working examples of the features implemented. The second one, located at `src/TestsError` contains only programs with errors 
+You can find two sets of test files, working files and error files. The first set, located at `src/TestsOk` contains only working examples of the features implemented. The second one, located at `src/TestsError` contains only programs with errors   
+### Project Structure ###
+
+These are the main files of this project:
+  * **Lexer.x**: We define the token Data in this file and how a string will be separated in tokens. 
+  * **Data.hs**: Contains the definition of the AST structure and a set of useful functions to operate it.
+  * **Parser.y**: Contains the grammar specification required by happy to produce a Parser, it depends on the data types defined in Data.hs
+  * **SymbolTable.hs**: Contains the Data structure that we use to perform the static analysis, the symbol table. A set of functions related to the symbol table if provided too.
+  * **Analyzer.hs**: Contains functions to perform the static analysis. When a file is passed to the interpreter, this is splitted in tokens, converted to an AST, and the Analyzer checks that AST to find static errors, such as dividing by zero, undefined references, unvalid function calls, etc. If the analyzer finds some errors, the interpreter won't try to run the program. Otherwise, the analyzer will return a cleaned AST with some little optimizations like constant propagation.
+  * **Interpret.hs**: Contains functions to perform the actual running of the program. When a valid AST is passed to the Interpret function provided in this file, the function will return a Status that returns some basinc information about the program, such as if the program ended succesfully or if it failed and why.
