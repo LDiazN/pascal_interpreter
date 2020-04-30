@@ -9,6 +9,8 @@ begin
     writeln(x);
 end;
 
+
+
 begin
     x:= -1;
 
