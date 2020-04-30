@@ -31,9 +31,10 @@ catchP p f = case p of
             Failed s -> f s
 
 happyError :: [Token] -> Parser a 
-happyError ((Token (AlexPn _ ln col) t):tks) = failP $ 
+happyError ((Token (AlexPn _ ln col) t):_) = failP $ 
           "Parse Error: Unexpected symbol '" ++ show t ++ "'\n" ++ 
           "At line: " ++ show ln ++  ", column: " ++ show col 
+happyError [] = failP "Parse error: Unexpected EOF"
 
 
 --happyError :: Parser a

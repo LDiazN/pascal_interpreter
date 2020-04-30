@@ -32,6 +32,11 @@ executable Pascal
                       , bytestring
                       , array
                       , hspec
+                      , primitive
+                      , random
+                      , containers
+                      , mtl
+                      , directory
 
   hs-source-dirs:      src
   build-tools:         happy, alex

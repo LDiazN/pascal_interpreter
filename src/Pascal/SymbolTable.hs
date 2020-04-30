@@ -86,9 +86,9 @@ pushEmptyScope st@SymbolTable{ scopeStk = s, scopeCnt = c } =
 
 -- Pop a scope
 popScope :: SymbolTable -> SymbolTable
-popScope st@SymbolTable{ scopeStk = [] }   = 
+popScope    SymbolTable{ scopeStk = [] }   = 
     error "error in popScope: there is no scope to pop from the stack" 
-popScope st@SymbolTable{ scopeStk = x:xs } = st{scopeStk = xs}
+popScope st@SymbolTable{ scopeStk = _:xs } = st{scopeStk = xs}
 
 {- 
  Find the symbol by name in the current scope.
@@ -118,8 +118,8 @@ findSym' s f st =
         findSym'':: [Int] -> [Symbol] -> Maybe Symbol
         findSym'' [] _ = Nothing
         findSym'' _ [] = Nothing
-        findSym'' (x:xs) l = case L.find (\s -> ((==x) . symScope $ s) && f s ) l of
-                                Just sym -> Just sym
+        findSym'' (x:xs) l = case L.find (\a -> ((==x) . symScope $ a) && f a ) l of
+                                Just sym' -> Just sym'
                                 Nothing  -> findSym'' xs l
     in sym
 
@@ -146,8 +146,8 @@ insertSym sym st =
         symName = symId sym
         smap = symMap st
         currScope = head . scopeStk $ st
-        checkSym = findSym symName st
-        newSt = case checkSym of 
+        sym' = findSym symName st
+        newSt = case sym' of 
                     Nothing -> Just newSt'
                     Just s  -> if symScope s == currScope
                                     then Nothing
@@ -200,7 +200,7 @@ popFunc st@SymbolTable{funcStack = funcs}
 -- get the top of the function stack. If no function is stacked, return ""
 topFunc :: SymbolTable -> String
 topFunc SymbolTable{funcStack = []} = ""
-topFunc SymbolTable{funcStack = x:xs} = x
+topFunc SymbolTable{funcStack = x:_} = x
 
 -- Replace the value of the first value that checks the predicate
 replace :: Eq a => [a] -> (a->Bool) -> a -> [a]
@@ -214,13 +214,13 @@ setVal :: String -> SymType -> SymbolTable -> SymbolTable
 setVal s x st = 
     let 
         smap = symMap st
-        checkSym = findSym s st
-        sym = fromJust checkSym
+        sym' = findSym s st
+        sym = fromJust sym'
         newSym = sym{symType = x}
         slist = fromMaybe [] (M.lookup s smap)
         newList = replace slist (==sym) newSym
 
-        newSt = case checkSym of 
+        newSt = case sym' of 
                     Nothing   -> st
                     Just _    -> st{ symMap = M.insert s newList smap }
     in newSt

@@ -15,7 +15,6 @@ import Data.Fixed
 import Data.Either
 import Control.Monad
 import Control.Monad.State
-import qualified Data.List  as L
 import qualified Data.Map   as M
 import qualified Data.Set   as S
 import qualified Text.Read  as TR
@@ -70,7 +69,7 @@ interpret (_,p) = interpret' p
 
 interpret' :: D.Program -> IO Status
 interpret' prog = do
-    (status,state) <- runStateT (runProgram prog) ST.newTable
+    (status,_) <- runStateT (runProgram prog) ST.newTable
     --print state
     return status
 
@@ -222,6 +221,7 @@ runProgram D.Program{D.progDecl = pd, D.progInstrs = instrs} = do
                                                         runInst incrAssing
                                                         loop
                             Right (ST.BoolVar False) -> return Continue
+                            _  -> error "Error in for loop condition: unknown return"
                 --Init iterator & run the loop
                 status <- runInst initAssign
                 case status of 
@@ -258,7 +258,7 @@ runProgram D.Program{D.progDecl = pd, D.progInstrs = instrs} = do
             status <- runFunc' s args
             case status of 
                 err@Error{} -> return err{errPos = p}
-                x           -> return Continue
+                _           -> return Continue
                         
 
         ----
@@ -356,7 +356,7 @@ runBuiltIn s args = do
         printVal :: ST.SymType -> IO()
         printVal ST.RealVar{ST.rval = r} = putStr . show  $ r
         printVal ST.BoolVar{ST.bval = b} = putStr . show  $ b
-        printVal s = error $ "Error in runBuiltIn: this is not a printable symbol" ++ show s
+        printVal fsym = error $ "Error in runBuiltIn: this is not a printable symbol" ++ show fsym
 
         numFun = fromJust $ M.lookup s D.numFuns
         numVal = ST.rval . head $ vals
@@ -374,7 +374,7 @@ runBuiltIn s args = do
                 --We assume that the args are not empty since this program
                 --passed the static analysis
                 varname = case head args of 
-                            D.IdExpr{D.idExpr=s} -> s
+                            D.IdExpr{D.idExpr=expid} -> expid
                             D.NumExpr{D.numExpr=D.NumVar{D.numVarId=nid}} -> nid
                             D.BoolExpr{D.boolExpr=D.BoolVar{D.boolVarId=blid}} -> blid
                             _ -> error $ "This is not a valid arg for readln function " ++ show args
@@ -408,6 +408,7 @@ runBuiltIn s args = do
                     | stype == D.RealT && isJust mnum =  do 
                         put $ ST.setVal varname (ST.RealVar . fromJust $ mnum) st
                         return Continue
+                    | otherwise = error "Error reading user input: Unknown error"
             --io $ print ret
             ret 
     
@@ -434,6 +435,7 @@ eval D.BoolExpr{D.boolExpr = expr} = do
         Left x     -> return $ Left x
         Right f    -> return $ Right ST.BoolVar{ST.bval=f}
 
+eval _ = error "Error in eval: Unvalid expression"
 
 --Evaluate returns either an ErrClass describing some kind of error, or a constant value:
 evalNumExp :: D.NumExp -> RetState (Either ErrClass Float)
@@ -454,7 +456,6 @@ evalNumExp D.NumVar{D.numVarId = s} = do
     return ret
 
 evalNumExp D.Op2{D.binOp = o, D.binOprn1 = opr1, D.binOprn2 = opr2} = do
-    st <- get
     val1' <- evalNumExp . D.numExpr $ opr1
     val2' <- evalNumExp . D.numExpr $ opr2
     let 
@@ -466,6 +467,7 @@ evalNumExp D.Op2{D.binOp = o, D.binOprn1 = opr1, D.binOprn2 = opr2} = do
                 "*" -> (*)
                 "/" -> (/)
                 "%" -> mod'
+                er  -> error $ "unvalid num operator: " ++ er
         ret
             | isLeft val1' =  val1'
             | isLeft val2' =  val2'
@@ -476,7 +478,6 @@ evalNumExp D.Op2{D.binOp = o, D.binOprn1 = opr1, D.binOprn2 = opr2} = do
     return  ret
 
 evalNumExp D.Op1{D.unOp = o, D.unOprn = opr} = do
-    st   <- get
     val' <- evalNumExp . D.numExpr $ opr
     let
         val  = fromRight 0 val'
@@ -490,7 +491,6 @@ evalNumExp D.Op1{D.unOp = o, D.unOprn = opr} = do
     return  ret
 
 evalNumExp D.NumFunCall{D.numFuncId = s, D.numFunArgs = exprs} = do
-    st  <- get 
     ret <- runFunc' s exprs
     case ret of 
         Ok  -> error $ "error in evalNumExp: this is a procedure, not a function: " ++ s
@@ -516,7 +516,6 @@ evalBoolExp D.BoolVar{D.boolVarId = s} = do
     return ret
 
 evalBoolExp D.BoolFunCall{D.boolFuncId = s, D.boolFunArgs = exprs} = do
-    st <- get
     res <- runFunc' s exprs
     case res of
         Ok                  -> error $ "Error in evalBoolExp: this is not a boolean function: " ++ s
@@ -591,11 +590,6 @@ evalBoolExp D.OpB{D.boolOp = o, D.boolOprn1 = opr1, D.boolOprn2 = opr2} = do
         Right _ -> error "Error in evalBoolExp: this is not a valid booleam expression"
     
 
--- Aux function: get the right value from an Either a b,
--- but it may cause an error if the arg is left
-fromLeft' :: Either a b -> a
-fromLeft' (Left x) = x
-fromLeft' _ = error "Error in fromLeft': Cannot get Left value from a Right value"
 
 fromRight' :: Either a b -> b
 fromRight' (Right x) = x

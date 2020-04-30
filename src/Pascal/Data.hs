@@ -318,7 +318,7 @@ reduceConstant _ = error "Incorrect use of reduceConstant"
 -- Aux function: Given a boolean expressionm reduce as much
 -- as possible.  If some error is found, return Nothing
 reduceConstantBool :: BoolExp -> Maybe BoolExp
-reduceConstantBool ne@(Not (BoolExpr expr)) = 
+reduceConstantBool (Not (BoolExpr expr)) = 
     
     let 
 
@@ -338,10 +338,10 @@ reduceConstantBool Not{} = error "Not a valid Bool Exp in reduceConstantBool"
 reduceConstantBool be@(OpB o op1 op2) = 
     let
         newOp1 = case op1 of
-                    BoolExpr be -> be
+                    BoolExpr be'-> be'
                     _           -> error "Error in reduceConstantBool, this not a bool expr"
         newOp2 = case op2 of
-                    BoolExpr be -> be
+                    BoolExpr be'-> be'
                     _           -> error "Error in reduceConstantBool, this not a bool expr"
         
         newOp1' = reduceConstantBool newOp1
@@ -350,10 +350,7 @@ reduceConstantBool be@(OpB o op1 op2) =
         newOp1'' = fromJust newOp1'
         newOp2'' = fromJust newOp2'
 
-        op = case o of 
-                "or"  -> (||)
-                "and" -> (&&)
-                _ -> error "Error in reduceConstantBool: not a valid operator"
+        op = strToBoolOp o
 
         newExp 
             | isNothing newOp1' || isNothing newOp2' = Nothing
@@ -364,9 +361,7 @@ reduceConstantBool be@(OpB o op1 op2) =
 
 reduceConstantBool be@(CompOp o (NumExpr ne1) (NumExpr ne2)) =
     let 
-        op = case o of 
-                "="  -> (==)
-                "<>" -> (/=)
+        op = strToCompOp o
 
         newOp1 = reduceConstantNum ne1
         newOp2 = reduceConstantNum ne2
@@ -383,9 +378,7 @@ reduceConstantBool be@(CompOp o (NumExpr ne1) (NumExpr ne2)) =
 
 reduceConstantBool be@(CompOp o (BoolExpr be1) (BoolExpr be2)) =
     let 
-        op = case o of 
-                "="  -> (==)
-                "<>" -> (/=)
+        op = strToCompOp o
 
         newOp1 = reduceConstantBool be1
         newOp2 = reduceConstantBool be2
@@ -441,9 +434,7 @@ reduceConstantNum op@Op1{unOp = o, unOprn = expr'}
         redExp   = reduceConstantNum expr
         redExp'  = fromJust redExp
         constant = numVal redExp'
-        oper 
-            | o == "+" = (0+)
-            | o == "-" = (0-)
+        oper = strToUnOp o
         newExp 
             | isNothing redExp = Nothing
             | isNumConstant redExp' = Just . NumConst . oper $ constant
@@ -467,13 +458,7 @@ reduceConstantNum op@Op2{binOp = o,binOprn1 = opr1' , binOprn2 = opr2'} =
         oper1Val = numVal newOp1'
 
         --In case of addition or multiplication:
-        oper  =  case o of 
-                "%" -> mod'
-                "*" -> (*)
-                "+" -> (+)
-                "/" -> (/)
-                "-" -> (-)
-                _   -> error "Logic error in reduceConstantNum"
+        oper  =  strToBinOp o
         
         --In case of division:          
         newExp   
@@ -527,7 +512,7 @@ instance Show Statement where
         where 
             stmts' = blockInsts b
             stmts  =  unlines . map ("  "++) . lines . concatMap show $ stmts'
-    show (Assign vid exp _) = vid ++ " := " ++  show exp ++ "\n"
+    show (Assign vid expr _) = vid ++ " := " ++  show expr ++ "\n"
 
     show mif@If{}  = "IF (" ++ expr ++ ") " ++ "[ BID: " ++ bid ++ " ]\n" ++
                      sccbody ++ "ELSE: " ++ fbody   
@@ -574,6 +559,7 @@ instance Show Statement where
     
     show Break{} = "BREAK\n"
     show Continue{} = "CONTINUE\n"
+    show Skip = ""
 
 instance Show Program where
     show (Program pins pdec) = strdec ++ "\n" ++ show pins
@@ -583,11 +569,11 @@ instance Show Program where
 instance Show Exp where
     show BoolExpr{ boolExpr = b} = show b
     show NumExpr{numExpr = n} = show n
-    show FunExpr{funExpId=id, funExpArgs = args} = 
-        id ++ "(" ++ args' ++ ")"
+    show FunExpr{funExpId=feid, funExpArgs = args} = 
+        feid ++ "(" ++ args' ++ ")"
         where 
             args' = concatMap ((++ "; ") . show ) args
-    show IdExpr{idExpr = id} = "[var]" ++ id
+    show IdExpr{idExpr = expid} = "[var]" ++ expid
     show BinaryOp{opert = o, oper1 = op1, oper2 = op2} = "( " ++ o ++ " (" ++
                                 show op1 ++") ("++ show op2 ++ ") )"
 
@@ -605,12 +591,12 @@ instance Show BoolExp where
     show OpB{boolOp = o, boolOprn1 = op1, boolOprn2 = op2} = "( " ++ o ++ 
                             " (" ++ show op1 ++ ") (" ++ show op2 ++ ")"
     show Not{notExpr = ne} = "NOT (" ++ show ne ++ ")"
-    show BoolFunCall{boolFuncId = id, boolFunArgs = args} = id ++ "(" ++ args' ++ ")"
+    show BoolFunCall{boolFuncId = bfid, boolFunArgs = args} = bfid ++ "(" ++ args' ++ ")"
         where args' = concatMap ((++ "; ") . show) args
 
     show TrueC = "true"
     show FalseC = "false"
-    show BoolVar{boolVarId = id} = id
+    show BoolVar{boolVarId = bvid} = bvid
     show RelOp{relOp = o, relOprn1 = op1, relOprn2 = op2} = "( " ++ o ++ 
                             " (" ++ show op1 ++ ") (" ++ show op2 ++ "))"
     show CompOp{compOp = o, compArg1 = op1, compArg2 = op2} = "( " ++ o ++ 

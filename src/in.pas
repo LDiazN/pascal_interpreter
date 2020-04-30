@@ -1,9 +1,9 @@
 program AddNums;
 
 
-var i,b,z:real;
+var i,b,z:boolean;
 
-function fibo(x:real) : real;
+function fibo(x:real; a,b : boolean) : real;
 
 begin
     if x = 0 then
@@ -17,7 +17,8 @@ end;
 
 begin
     
-    i := ln(2) + 20;
-    readln(i);
-    writeln(i);
+    for fibo := 0 to 10 do
+    begin
+        
+    end;
 end.

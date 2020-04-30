@@ -13,8 +13,6 @@ import Control.Monad.State
 import Data.Maybe
 import Data.Either
 ---------------------------------------------
-import qualified Data.List          as L
-import qualified Data.Map           as M
 import qualified Data.Set           as S
 ---------------------------------------------
 import qualified Pascal.SymbolTable as ST
@@ -74,6 +72,12 @@ data ErrClass = Ok
                     unmVarType :: D.DataType,
                     unmExpType :: D.DataType
                     }
+                --Unmatching expected type with actual type
+              | UnmtchExpTypeVar{
+                    unmtExpVar :: String,
+                    unmtExpecType :: D.DataType,
+                    unmtActType :: D.DataType 
+                }
                 --condition in some conditional statement is not a 
                 --boolean expression
               | CondNotBool{
@@ -92,9 +96,7 @@ data ErrClass = Ok
                 -- out of loop statement)
               | LoopCntrlOOC 
                 --iterator variable assign
-              | UnvLoopAssign{
-                  itVar :: String
-              } 
+              | UnvLoopAssign String
                 --The only possible args in readln function is a single variable
               | UnvReadlnArgs
                 deriving(Eq)
@@ -136,10 +138,10 @@ type RetState a  = StateT ContextState IO a
 
 analyzeAST :: D.MainProgram -> IO (Either String D.MainProgram)
 analyzeAST mp = do 
-    (p, state) <- runStateT (analyzer mp) (ContextState ST.newTable [] [Program] [] False [])
+    (p, nstate) <- runStateT (analyzer mp) (ContextState ST.newTable [] [Program] [] False [])
 
     let 
-        errs = errors state
+        errs = errors nstate
 
     if null errs
         then return (Right p)
@@ -152,9 +154,9 @@ analyzer (pname, p) = do
         return  (pname, newP)
 
 analyzer' :: D.Program -> RetState D.Program
-analyzer' p@D.Program{D.progInstrs = pi, D.progDecl = pd} = do
-        newDec  <- forM  pd checkDecl
-        newInst <- checkStmnt pi 
+analyzer' D.Program{D.progInstrs = pins, D.progDecl = pdecs} = do
+        newDec  <- forM  pdecs checkDecl
+        newInst <- checkStmnt pins 
         return $ D.Program newInst newDec
  
     where
@@ -164,18 +166,19 @@ analyzer' p@D.Program{D.progInstrs = pi, D.progDecl = pd} = do
 
         --Check variable declaration
         checkDecl v@D.Variable{} = do
-            state <- get
+            nstate <- get
             let 
-                errs = errors state
+                errs = errors nstate
                 varType = D.varType v
                 varname = D.varId v
-                st      = symTable state
+                st      = symTable nstate
                 err     = checkSymAvail varname st
                 decpos  = D.vDeclpos v
                 newError= ContextError{errPos = decpos, errType = err}
                 symType = case varType of
                             D.RealT    -> ST.RealVar{ST.rval = 0}
                             D.BooleanT -> ST.BoolVar{ST.bval = True}
+                            _          -> error "unvalid variable type"
 
                 newSym  = ST.Symbol{
                             ST.symId    = varname,
@@ -192,16 +195,16 @@ analyzer' p@D.Program{D.progInstrs = pi, D.progDecl = pd} = do
                     | err == Ok = errs
                     | otherwise = newError:errs 
 
-            put state{ errors=newErrs, symTable = newSt }
+            put nstate{ errors=newErrs, symTable = newSt }
             return v
         
         -- check a function
         checkDecl f@D.Function{} = do
-            state <- get
+            nstate <- get
             let 
                 fname    = D.funcId f
-                st       = symTable state
-                errs     = errors state
+                st       = symTable nstate
+                errs     = errors nstate
                 errFname = checkSymAvail fname st 
                 args'    = D.funcArgs f
                 decpos   = D.fDeclPos f
@@ -226,9 +229,9 @@ analyzer' p@D.Program{D.progInstrs = pi, D.progDecl = pd} = do
                 newSt'   = ST.pushFunc fname . ST.pushEmptyScope $ fromMaybe st (ST.insertSym newSym st)
                  
             --simulate
-            put state{  errors = newErrs, 
+            put nstate{  errors = newErrs, 
                         symTable = newSt',
-                        checkingFun = fname:checkingFun state,
+                        checkingFun = fname:checkingFun nstate,
                         funOk = False
                         }
             -- if the function is a function with return value, 
@@ -265,11 +268,11 @@ analyzer' p@D.Program{D.progInstrs = pi, D.progDecl = pd} = do
             return b{D.blockInsts = newInst}
         --Check assign
         checkStmnt a@D.Assign{D.assVarId = s, D.assVal = expr, D.assPos = p} = do
-            state@ContextState{errors = errs, symTable = st, checkingFun = cf, iters=its} <- get
+            nstate@ContextState{errors = errs, symTable = st, checkingFun = cf, iters=its} <- get
             let 
                 --Expression checking
                 expErrs = case cleaned' of
-                            Left errs -> errs
+                            Left er   -> er
                             _         -> []
                 cleaned'= cleanExpr expr st
                 cleaned = fromRight expr cleaned'
@@ -300,12 +303,12 @@ analyzer' p@D.Program{D.progInstrs = pi, D.progDecl = pd} = do
                     | not (null isIter) =
                             [UnvLoopAssign s]
                     | otherwise = [] 
-                newErrs' = [ContextError p s | s <- newErrs] ++ errs
+                newErrs' = [ContextError p er | er <- newErrs] ++ errs
                 --Function return checking
                 newFunOk 
                     | null cf = False
-                    | otherwise = funOk state || head cf == s
-            put state{
+                    | otherwise = funOk nstate || head cf == s
+            put nstate{
                         errors = newErrs',
                         funOk = newFunOk
                     }
@@ -317,7 +320,7 @@ analyzer' p@D.Program{D.progInstrs = pi, D.progDecl = pd} = do
                                 D.succInst=sins, 
                                 D.failInst=fins,
                                 D.ipos = p} = do
-            state@ContextState{symTable = st, errors = errs} <- get
+            nstate@ContextState{symTable = st, errors = errs} <- get
             let 
                 newBid  = ST.scopeCnt st
                 newSt   = ST.pushEmptyScope st
@@ -331,7 +334,7 @@ analyzer' p@D.Program{D.progInstrs = pi, D.progDecl = pd} = do
                         [ContextError p (CondNotBool p)]
                     | otherwise = []
 
-            put state{errors = newErrs ++ errs, symTable=newSt}
+            put nstate{errors = newErrs ++ errs, symTable=newSt}
             newSuccInst <- checkStmnt sins
             newFailInst <- checkStmnt fins
             lastState   <- get  
@@ -346,7 +349,7 @@ analyzer' p@D.Program{D.progInstrs = pi, D.progDecl = pd} = do
         
         --Check while
         checkStmnt w@D.While{D.whCond = expr, D.whBody = wbody, D.wpos = p } = do
-            state@ContextState{ symTable = st, 
+            nstate@ContextState{ symTable = st, 
                                 errors=errs, 
                                 analysisState=states} <- get
             let 
@@ -369,7 +372,7 @@ analyzer' p@D.Program{D.progInstrs = pi, D.progDecl = pd} = do
 
             -- Put the state with a new scope pushed, errors updates
             -- and the loop state at the top of the states stack
-            put state{
+            put nstate{
                     errors = newErrs ++ errs,
                     symTable = newSt,
                     analysisState = newStates
@@ -395,7 +398,7 @@ analyzer' p@D.Program{D.progInstrs = pi, D.progDecl = pd} = do
 
         --Check a for loop
         checkStmnt f@D.For{} = do
-            state@ContextState{ symTable = st,
+            nstate@ContextState{ symTable = st,
                                 errors = errs,
                                 iters = its,
                                 analysisState = states} <- get
@@ -433,7 +436,10 @@ analyzer' p@D.Program{D.progInstrs = pi, D.progDecl = pd} = do
                         [ContextError p IteretNotNum]
                     | otherwise = []
                 newErrs' 
-                    | isNothing itSym = ContextError p (UndefinedRef iter) : newErrs
+                    | isNothing itSym || ST.isFunc itSym' || ST.isProc itSym' =
+                        ContextError p (UndefinedRef iter) : newErrs
+                    | not (ST.isRealVar itSym') && ST.isBoolVar itSym' = 
+                        ContextError p (UnmtchExpTypeVar (ST.symId itSym') D.RealT D.BooleanT) : newErrs
                     | otherwise = newErrs
                 --new State Data:
                 newStates = Loop:states
@@ -441,7 +447,7 @@ analyzer' p@D.Program{D.progInstrs = pi, D.progDecl = pd} = do
                 
             
             --Put the new state
-            put state{
+            put nstate{
                     symTable = newSt,
                     analysisState = newStates,
                     errors = newErrs' ++ errs,
@@ -461,7 +467,7 @@ analyzer' p@D.Program{D.progInstrs = pi, D.progDecl = pd} = do
 
         --Check case
         checkStmnt cs@D.Case{} = do
-            state@ContextState{ symTable = st, 
+            nstate@ContextState{ symTable = st, 
                                 errors = errs } <- get
             let 
                 -- 'Case' current data
@@ -502,7 +508,7 @@ analyzer' p@D.Program{D.progInstrs = pi, D.progDecl = pd} = do
                 
             --now we have to push an empty scope and check all the statements in the 
             --right side of the case labels
-            put state{
+            put nstate{
                 symTable = ST.pushEmptyScope st,
                 errors = newErrs ++ errs
                 }
@@ -527,7 +533,7 @@ analyzer' p@D.Program{D.progInstrs = pi, D.progDecl = pd} = do
         
         --check procedure call
         checkStmnt fc@D.ProcCall{D.procName = s, D.procCallArgs = args, D.pcallPos = p} = do
-            state@ContextState{symTable = st, errors = errs} <- get
+            nstate@ContextState{symTable = st, errors = errs} <- get
             let 
                 newArgs' = map (`cleanExpr` st) args
                 newArgs = rights newArgs'
@@ -544,21 +550,21 @@ analyzer' p@D.Program{D.progInstrs = pi, D.progDecl = pd} = do
                 isVar (D.BoolExpr D.BoolVar{}) = True
                 isVar _ = False
 
-            unless (null newErrs) $ put state{errors = newErrs ++ errs}
+            unless (null newErrs) $ put nstate{errors = newErrs ++ errs}
 
             return fc{D.procCallArgs = newArgs}
 
 
         checkStmnt c@D.Continue{D.contPos = p} = do
-            state@ContextState{errors = errs, analysisState = anSt} <- get
-            put state{
+            nstate@ContextState{errors = errs, analysisState = anSt} <- get
+            put nstate{
                 errors = [ContextError p LoopCntrlOOC | head anSt /= Loop] ++ errs
             }
             return c
 
         checkStmnt b@D.Break{D.bpos = p} = do
-            state@ContextState{errors = errs, analysisState = anSt} <- get
-            put state{
+            nstate@ContextState{errors = errs, analysisState = anSt} <- get
+            put nstate{
                 errors = [ContextError p LoopCntrlOOC | head anSt /= Loop] ++ errs
             }
             return b
@@ -605,7 +611,7 @@ checkExpr D.IdExpr{D.idExpr = s} st =
     in  errs
 
 --Check function call
-checkExpr D.FunExpr{D.funExpId = s, D.funExpArgs = args, D.callPos = p} st = 
+checkExpr D.FunExpr{D.funExpId = s, D.funExpArgs = args} st = 
     let 
         newErrs = 
             case checkFun' s args st of
@@ -678,7 +684,7 @@ checkFun sym@ST.Symbol{ST.symType = f@ST.Function{}} exps st =
         fargs       = ST.funcArgs f
         fname       = ST.symId sym
         nargsMsg    = "Unmatching number of arguments."
-        unvArgsMsg  = "Unvalid expressions in arguments."
+        munvArgsMsg = "Unvalid expressions in arguments."
         unvTypesMsg = "Unmatching arguments types."
         argsErrs    = foldl (\b a -> checkExpr a st ++ b ) [] exps
         argsTypes   = map snd fargs
@@ -686,7 +692,7 @@ checkFun sym@ST.Symbol{ST.symType = f@ST.Function{}} exps st =
         typeMatch   = zipWith (==) argsTypes currArgsT
         errs
             | length exps /= length fargs = [UnvalidArgs fname nargsMsg]
-            | not . null $ argsErrs       =  UnvalidArgs fname unvArgsMsg:argsErrs
+            | not . null $ argsErrs       =  UnvalidArgs fname munvArgsMsg:argsErrs
             | not (and typeMatch)         = [UnvalidArgs fname unvTypesMsg]
             | otherwise                   = []
 
@@ -705,7 +711,7 @@ checkFun' s args st =
             | otherwise= ST.findSym s st 
         sym'      = fromJust sym
         
-        isBuiltIn = S.member s D.builtInFuns
+        
         argsErrs  = checkFun sym' args st
         newErrs 
             | isNothing sym = [UndefinedRef s]
@@ -759,7 +765,7 @@ getType D.BinaryOp{D.opert = o} _
 -- a simpler version of such expression with the types correctly
 -- checked
 reduceExpr :: D.Exp -> ST.SymbolTable -> Either D.BoolExp D.NumExp
-reduceExpr bo@D.BinaryOp{D.opert = o, D.oper1 = e1, D.oper2 = e2} st
+reduceExpr D.BinaryOp{D.opert = o, D.oper1 = e1, D.oper2 = e2} st
     | o == "=" || o == "<>"  = 
         let
             op1 = case reduceExpr e1 st of
@@ -780,11 +786,11 @@ reduceExpr bo@D.BinaryOp{D.opert = o, D.oper1 = e1, D.oper2 = e2} st
     | opInType o == D.RealT = --input is real, output may be bool or real
         let 
             op1 = case reduceExpr e1 st of 
-                    Left be  -> error "Error reducing expression: unmatching args types"
+                    Left _   -> error "Error reducing expression: unmatching args types"
                     Right ne -> D.NumExpr ne
             
             op2 = case reduceExpr e2 st of 
-                    Left be  -> error "Error reducing expression: unmatching args types"
+                    Left _   -> error "Error reducing expression: unmatching args types"
                     Right ne -> D.NumExpr ne
             
             newExp 
@@ -806,10 +812,10 @@ reduceExpr bo@D.BinaryOp{D.opert = o, D.oper1 = e1, D.oper2 = e2} st
         let 
             op1 = case reduceExpr e1 st of
                     Left be  -> D.BoolExpr be
-                    Right ne -> error "Error reducing expression: unmatching args types"
+                    Right _  -> error "Error reducing expression: unmatching args types"
             op2 = case reduceExpr e2 st of
                     Left be  -> D.BoolExpr be
-                    Right ne -> error "Error reducing expression: unmatching args types"
+                    Right _  -> error "Error reducing expression: unmatching args types"
 
             newExp = Left $ D.OpB o op1 op2
 
@@ -843,23 +849,24 @@ reduceExpr D.FunExpr{D.funExpId = s, D.funExpArgs = args} st =
                 "Error in reduceExpr, this is not a valid function: " ++ s
             | ftype == D.RealT = Right (D.NumFunCall s newArgs)
             | ftype == D.BooleanT = Left (D.BoolFunCall s newArgs)
+            | otherwise = error "Error in reduceExpr: unconsistent function expression"
     in newExp
 
 reduceExpr (D.BoolExpr (D.Not e1)) st = 
     let
         newExp = case reduceExpr e1 st of
                     Left eb  -> Left . D.Not . D.BoolExpr $ eb
-                    Right en -> error  
+                    Right _  -> error  
                         "Error in reduceExpr: not a valid bool exp in Not argument"
 
     in newExp
 
 reduceExpr (D.BoolExpr expr) _ = Left expr
 
-reduceExpr (D.NumExpr unop@(D.Op1 o e1)) st = 
+reduceExpr (D.NumExpr unop@(D.Op1 _ e1)) st = 
     let
         newExp = case reduceExpr e1 st of
-                    Left eb  -> error  
+                    Left _  -> error  
                         "Error in reduceExpr: not a valid real exp in unary op argument"
                     Right en -> Right unop{D.unOprn= D.NumExpr en}
 
@@ -961,7 +968,11 @@ instance Show ErrClass where
         "variable '" ++ s ++ "' of type " ++ show dt1 ++ 
         " and expression of type " ++ show dt2  
 
-    show (CondNotBool p) =
+    show (UnmtchExpTypeVar s expt actt) =
+        "Couldn't match expected type " ++ show expt ++ " with variable " ++ 
+        s ++ " of type " ++ show actt
+
+    show (CondNotBool _) =
         "Expression in conditional statement must be a boolean expression"
 
     show IteretNotNum =
@@ -975,6 +986,7 @@ instance Show ErrClass where
 
     show CaseNotConstLabel =
         "Case statement labels must be constant expressions"
+
     show LoopCntrlOOC = 
         "'continue' or 'break' statement found out of loop"
     

@@ -159,13 +159,20 @@ FuncDeclar   :: {Declaration} --Declare procedure or function
              | procedure name '(' ')' ';' Program ';'             { Function (getId $2) [] NoneT $6 (getPos $2)}
 
 FuncArgsDec  :: {[(String, DataType)]}
-             : VarDeclars2                      {reverse [ (getId t, dt) | (t, dt) <- $1]}
-             | FuncArgsDec ';' VarDeclars2      { $1 ++ reverse [ (getId t, dt) | (t, dt) <- $3] }
+             : VarDeclars4                      {reverse [ (getId t, dt) | (t, dt) <- $1]}
+             | FuncArgsDec ';' VarDeclars4      { $1 ++ reverse [ (getId t, dt) | (t, dt) <- $3] }
 
 VarDeclars   :: {[Declaration]}
-             : var VarDeclars2 ';'              { [ Variable (getId s) t (getPos s) | (s, t) <- $2 ] }
+             : var VarDeclars3                  { [ Variable (getId s) t (getPos s) | (s, t) <- $2 ] }        
 
 VarDeclars2  :: {[(Token, DataType)]}
+             : VarDeclars4 ';'                  { $1 }
+
+VarDeclars3  :: {[(Token, DataType)]}
+             : VarDeclars2                      { $1 }   
+             | VarDeclars3 VarDeclars2          { $2 ++ $1 }
+
+VarDeclars4  :: {[(Token, DataType)]}
              : Names ':' DataType               { [(s,$3) | s <- $1] }
 
 Names        :: {[Token]}

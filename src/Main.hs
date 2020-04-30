@@ -5,7 +5,6 @@ import System.Environment
 import System.Directory
 import Control.Monad
 
-import qualified Data.ByteString.Lazy.Char8 as BLC
 main :: IO ()
 main = do
     args <- getArgs
@@ -20,7 +19,6 @@ main = do
       symTableMsg = "-st --symbol-table: [TEST FEATURE ONLY] Print the resulting symbol table with the native 'show'"++
                     " haskell method if there's no runtime, static, or lexical/syntactical errors"
       helpMsg     = "-h --help: Show this help"
-      noFlagsMsg  = "( no flags currently available )"
       availableFlags = [cleanAStMsg, astMsg, symTableMsg, helpMsg]
       help = "Use: Pascal [ filename ] { flags }\n  Available Flags: \n" ++ (unlines . map ("    "++) . concatMap lines) availableFlags
 
